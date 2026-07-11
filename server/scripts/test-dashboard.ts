@@ -30,8 +30,10 @@ const staffSid = app.signCookie(staffToken)
 // ── 픽스처 삽입 ──
 const fixNow = new Date()
 const fixOld = new Date(fixNow.getTime() - 20 * 24 * 60 * 60 * 1000) // 20일 전
-const fixResponseAt = new Date(fixNow.getTime() - 3 * 60 * 60 * 1000) // 3시간 전
-const fixFinalAt = new Date(fixNow.getTime() - 1 * 60 * 60 * 1000)    // 1시간 전
+// req4/req5 created_at 기준: 5시간 전 (response=3h 후, final=4h 후로 양수 리드타임 보장)
+const fixCreatedAt = new Date(fixNow.getTime() - 5 * 60 * 60 * 1000)  // 5시간 전
+const fixResponseAt = new Date(fixNow.getTime() - 2 * 60 * 60 * 1000) // 2시간 전 (창조 후 3시간)
+const fixFinalAt = new Date(fixNow.getTime() - 1 * 60 * 60 * 1000)    // 1시간 전 (창조 후 4시간)
 
 // req1: 열린 건, P1
 const [req1] = await db.insert(requests).values({
@@ -58,17 +60,19 @@ const [req3] = await db.insert(requests).values({
 await db.execute(sql`update requests set created_at = ${fixOld} where id = ${req3.id}`)
 
 // req4: 완료 건, rework_count=1, csat=1(긍정), SLA 준수
+// created_at을 5시간 전으로 UPDATE → firstResponseAt(2h전)·finalResolvedAt(1h전) 이 created_at 보다 뒤임
 const [req4] = await db.insert(requests).values({
   org: '배움', typeCode: 'error', title: '대시보드테스트-완료rework',
   requesterId: actorId, visibility: 'shared', status: '완료',
   reworkCount: 1,
   csatRating: 1,
-  assigneeId: actorId, assignedAt: fixNow,
+  assigneeId: actorId, assignedAt: fixCreatedAt,
   firstResponseAt: fixResponseAt,
-  responseDueAt: new Date(fixNow.getTime() + 60 * 60 * 1000),   // due=+1h → 응답은 -3h이므로 준수
+  responseDueAt: new Date(fixNow.getTime() + 60 * 60 * 1000),   // due=+1h → 응답은 created_at+3h이므로 준수
   finalResolvedAt: fixFinalAt,
-  resolutionDueAt: new Date(fixNow.getTime() + 2 * 60 * 60 * 1000), // due=+2h → 완료는 -1h이므로 준수
+  resolutionDueAt: new Date(fixNow.getTime() + 2 * 60 * 60 * 1000), // due=+2h → 완료는 created_at+4h이므로 준수
 }).returning()
+await db.execute(sql`update requests set created_at = ${fixCreatedAt} where id = ${req4.id}`)
 
 // req5: 완료 건, rework=0, csat=-1(부정)
 const [req5] = await db.insert(requests).values({
@@ -76,12 +80,13 @@ const [req5] = await db.insert(requests).values({
   requesterId: actorId, visibility: 'shared', status: '완료',
   reworkCount: 0,
   csatRating: -1,
-  assigneeId: actorId, assignedAt: fixNow,
+  assigneeId: actorId, assignedAt: fixCreatedAt,
   firstResponseAt: fixResponseAt,
   responseDueAt: new Date(fixNow.getTime() + 60 * 60 * 1000),
   finalResolvedAt: fixFinalAt,
   resolutionDueAt: new Date(fixNow.getTime() + 2 * 60 * 60 * 1000),
 }).returning()
+await db.execute(sql`update requests set created_at = ${fixCreatedAt} where id = ${req5.id}`)
 
 // req6: 반려 건
 const [req6] = await db.insert(requests).values({
@@ -120,8 +125,16 @@ console.log('(4) KPIs 검증 OK', JSON.stringify(kpis))
 // ── 5. leadtime 필드 존재 ──
 assert.ok('medianFirstResponseHours' in body.leadtime, 'medianFirstResponseHours 필드')
 assert.ok('medianResolutionHours' in body.leadtime, 'medianResolutionHours 필드')
-// req4/req5에 firstResponseAt이 있으므로 중앙값은 null이 아니어야 함
+// req4/req5에 firstResponseAt이 있으므로 중앙값은 null이 아니어야 하고 양수여야 함
 assert.ok(body.leadtime.medianFirstResponseHours !== null, 'medianFirstResponseHours not null')
+assert.ok(
+  body.leadtime.medianFirstResponseHours > 0,
+  `medianFirstResponseHours > 0 기대, got ${body.leadtime.medianFirstResponseHours}`,
+)
+assert.ok(
+  body.leadtime.medianResolutionHours !== null && body.leadtime.medianResolutionHours > 0,
+  `medianResolutionHours > 0 기대, got ${body.leadtime.medianResolutionHours}`,
+)
 console.log('(5) leadtime OK', JSON.stringify(body.leadtime))
 
 // ── 6. aging 구조 검증 ──

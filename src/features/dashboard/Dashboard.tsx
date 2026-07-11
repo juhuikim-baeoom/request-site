@@ -72,10 +72,11 @@ function buildRange(
 
 // ── 서브 컴포넌트: 섹션 래퍼 ──────────────────────────────────────────────────
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  const slug = title.replace(/\s+/g, '-').replace(/[^\w-]/g, '').toLowerCase()
   return (
-    <section aria-labelledby={`section-${title}`} className="mt-8">
+    <section aria-labelledby={`section-${slug}`} className="mt-8">
       <h2
-        id={`section-${title}`}
+        id={`section-${slug}`}
         className="mb-3 text-base font-semibold text-gray-800 border-b border-gray-200 pb-2"
       >
         {title}

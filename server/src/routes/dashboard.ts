@@ -180,14 +180,14 @@ export async function dashboardRoutes(app: FastifyInstance) {
           from request_view r
           where true ${fromCond} ${toCond}
           group by r.status
-          order by count desc
+          order by count(*) desc
         `),
         db.execute<{ org: string; count: string }>(sql`
           select r.org, count(*)::text as count
           from request_view r
           where true ${fromCond} ${toCond}
           group by r.org
-          order by count desc
+          order by count(*) desc
         `),
         db.execute<{ type_code: string; label: string; count: string }>(sql`
           select r.type_code, coalesce(rt.label, r.type_code) as label, count(*)::text as count
@@ -195,7 +195,7 @@ export async function dashboardRoutes(app: FastifyInstance) {
           left join request_types rt on rt.code = r.type_code
           where true ${fromCond} ${toCond}
           group by r.type_code, rt.label
-          order by count desc
+          order by count(*) desc
         `),
       ])
 
@@ -240,7 +240,7 @@ export async function dashboardRoutes(app: FastifyInstance) {
         where r.assignee_id is not null
           ${fromCond} ${toCond}
         group by r.assignee_id, u.name
-        order by open_count desc
+        order by count(*) filter (where r.status not in ('완료','반려','철회')) desc
       `)
 
       const byAssignee = assigneeRows.rows.map((row) => ({
