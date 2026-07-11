@@ -526,6 +526,7 @@ export type Database = {
         | '보류'
         | '반려'
         | '이관'
+        | '철회'
       request_visibility: 'private' | 'dept' | 'function' | 'org' | 'shared'
       user_role: 'staff' | 'system' | 'viewer'
     }

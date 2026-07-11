@@ -188,6 +188,45 @@ export function useAddComment(requestId: number) {
   })
 }
 
+// ---------- 본인 접수건 수정 / 철회 ----------
+export interface UpdateRequestInput {
+  title?: string
+  body?: string
+  priority?: RequestPriority
+  visibility?: RequestVisibility
+  desired_due?: string | null
+}
+
+export function useUpdateRequest(id: number) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (patch: UpdateRequestInput) => {
+      const { error } = await supabase.from('requests').update(patch).eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['requests', 'detail', id] })
+      void queryClient.invalidateQueries({ queryKey: ['requests', 'view'] })
+    },
+  })
+}
+
+/** 요청자 본인이 '접수' 상태 요청을 '철회'로 취소 (소프트 취소, 이력 보존) */
+export function useCancelRequest(id: number) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async () => {
+      const { error } = await supabase.from('requests').update({ status: '철회' }).eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['requests', 'detail', id] })
+      void queryClient.invalidateQueries({ queryKey: ['requests', 'view'] })
+      void queryClient.invalidateQueries({ queryKey: ['requests', 'history', id] })
+    },
+  })
+}
+
 /** 요청 유형 목록 (활성 유형만, 정렬순) */
 export function useRequestTypes() {
   return useQuery({

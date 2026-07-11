@@ -7,7 +7,7 @@
 -- ---------- 0. ENUM 타입 ----------
 create type user_role        as enum ('staff', 'system', 'viewer');
 create type request_org      as enum ('배움', '배론', '허브', '공통');
-create type request_status   as enum ('접수','확인','진행중','검수대기','재작업','완료','보류','반려','이관');
+create type request_status   as enum ('접수','확인','진행중','검수대기','재작업','완료','보류','반려','이관','철회');
 create type request_priority as enum ('긴급', '보통', '낮음');
 create type request_source   as enum ('web', 'email');
 create type request_visibility as enum ('private', 'dept', 'function', 'org', 'shared');
@@ -253,7 +253,7 @@ select
   case when r.completed_at is not null
        then (r.completed_at::date - r.created_at::date) end       as final_lead_days,
   case
-    when r.status in ('완료','반려','보류','이관') then r.status::text
+    when r.status in ('완료','반려','보류','이관','철회') then r.status::text
     when r.desired_due is not null and r.desired_due <  current_date       then '기한초과'
     when r.desired_due is not null and r.desired_due <= current_date + 1   then '임박'
     when r.desired_due is null and r.created_at::date <= current_date - 3   then '지연'
@@ -348,11 +348,11 @@ create policy req_read on requests for select to authenticated
 --  (메일 접수 건은 GAS/서버가 service_role 키로 insert → RLS 미적용, source='email')
 create policy req_insert on requests for insert to authenticated
   with check (requester_id = auth.uid());
---  수정: 시스템팀 전체 / 요청자 본인은 '접수' 상태일 때만 (내용·공개범위·희망일 정정용,
---        처리 시작되면 잠김. 상태·담당 필드 변경은 앱단에서 차단)
+--  수정: 시스템팀 전체 / 요청자 본인은 '접수' 상태일 때만 (내용·공개범위·희망일 정정, 또는 '철회'로 취소)
+--        처리 시작되면 잠김. 상태(철회 제외)·담당 변경은 앱단에서 차단
 create policy req_update on requests for update to authenticated
   using (is_system() or (requester_id = auth.uid() and status = '접수'))
-  with check (is_system() or (requester_id = auth.uid() and status = '접수'));
+  with check (is_system() or (requester_id = auth.uid() and status in ('접수','철회')));
 create policy req_delete on requests for delete to authenticated
   using (is_system());
 

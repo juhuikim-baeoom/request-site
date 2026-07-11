@@ -1,17 +1,29 @@
 import { useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
+import { useAuth } from '../../auth/useAuth'
 import { Badge } from '../../components/Badge'
 import { VisibilityBadge } from '../../components/VisibilityBadge'
-import { STATUS_BADGE, PRIORITY_BADGE, dueBadgeClass } from '../../lib/constants'
-import type { RequestVisibility } from '../../types/database'
+import {
+  STATUS_BADGE,
+  PRIORITY_BADGE,
+  PRIORITY_OPTIONS,
+  VISIBILITY_OPTIONS,
+  dueBadgeClass,
+} from '../../lib/constants'
+import type { RequestPriority, RequestVisibility } from '../../types/database'
 import {
   getAttachmentUrl,
   useAddComment,
+  useCancelRequest,
   useRequestAttachments,
   useRequestComments,
   useRequestDetail,
   useRequestHistory,
+  useUpdateRequest,
 } from './api'
+
+const fieldCls =
+  'mt-1 block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand'
 
 function fmtDateTime(s: string | null): string {
   if (!s) return '-'
@@ -27,13 +39,23 @@ export function RequestDetail() {
   const { id: idParam } = useParams<{ id: string }>()
   const id = Number(idParam)
 
+  const { profile } = useAuth()
   const { data, isLoading, error } = useRequestDetail(id)
   const { data: attachments } = useRequestAttachments(id)
   const { data: history } = useRequestHistory(id)
   const { data: comments } = useRequestComments(id)
   const addComment = useAddComment(id)
+  const updateRequest = useUpdateRequest(id)
+  const cancelRequest = useCancelRequest(id)
 
   const [comment, setComment] = useState('')
+  const [editing, setEditing] = useState(false)
+  const [editTitle, setEditTitle] = useState('')
+  const [editBody, setEditBody] = useState('')
+  const [editPriority, setEditPriority] = useState<RequestPriority>('보통')
+  const [editVisibility, setEditVisibility] = useState<RequestVisibility>('dept')
+  const [editDue, setEditDue] = useState('')
+  const [actionError, setActionError] = useState<string | null>(null)
 
   async function handleDownload(path: string) {
     const url = await getAttachmentUrl(path)
@@ -62,6 +84,48 @@ export function RequestDetail() {
   }
 
   const { view: v, requester, assignee, sharedTargets } = data
+  const canEdit = v.requester_id === profile?.id && v.status === '접수'
+
+  function startEdit() {
+    setEditTitle(v.title ?? '')
+    setEditBody(v.body ?? '')
+    setEditPriority((v.priority as RequestPriority) ?? '보통')
+    setEditVisibility((v.visibility as RequestVisibility) ?? 'dept')
+    setEditDue(v.desired_due ?? '')
+    setActionError(null)
+    setEditing(true)
+  }
+
+  async function saveEdit(e: React.FormEvent) {
+    e.preventDefault()
+    setActionError(null)
+    if (!editTitle.trim() || !editBody.trim() || !editDue) {
+      setActionError('제목·상세내용·희망완료일은 필수입니다.')
+      return
+    }
+    try {
+      await updateRequest.mutateAsync({
+        title: editTitle.trim(),
+        body: editBody,
+        priority: editPriority,
+        visibility: editVisibility,
+        desired_due: editDue,
+      })
+      setEditing(false)
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : '수정 중 오류가 발생했습니다.')
+    }
+  }
+
+  async function handleWithdraw() {
+    if (!window.confirm('이 요청을 철회하시겠어요? 철회 후에는 되돌릴 수 없습니다.')) return
+    setActionError(null)
+    try {
+      await cancelRequest.mutateAsync()
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : '철회 중 오류가 발생했습니다.')
+    }
+  }
 
   return (
     <section className="mx-auto max-w-3xl space-y-6">
@@ -91,48 +155,164 @@ export function RequestDetail() {
         </div>
       </div>
 
-      {/* 메타 */}
-      <dl className="grid grid-cols-2 gap-x-6 gap-y-3 rounded-lg border border-gray-200 bg-white p-4 text-sm sm:grid-cols-3">
-        <div>
-          <dt className="text-xs text-gray-400">기관</dt>
-          <dd className="mt-0.5 text-gray-800">{v.org}</dd>
+      {/* 본인 접수건 액션 (수정 / 철회) */}
+      {canEdit && !editing && (
+        <div className="flex gap-2">
+          <button
+            onClick={startEdit}
+            className="rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+          >
+            수정
+          </button>
+          <button
+            onClick={() => void handleWithdraw()}
+            disabled={cancelRequest.isPending}
+            className="rounded-md border border-red-300 px-3 py-1.5 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-60"
+          >
+            취소(철회)
+          </button>
         </div>
-        <div>
-          <dt className="text-xs text-gray-400">유형</dt>
-          <dd className="mt-0.5 text-gray-800">{v.type_label}</dd>
+      )}
+      {actionError && (
+        <div
+          role="alert"
+          className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+        >
+          {actionError}
         </div>
-        <div>
-          <dt className="text-xs text-gray-400">희망완료일</dt>
-          <dd className="mt-0.5 text-gray-800">{v.desired_due ?? '-'}</dd>
-        </div>
-        <div>
-          <dt className="text-xs text-gray-400">요청자</dt>
-          <dd className="mt-0.5 text-gray-800">
-            {personLabel(requester) }
-            {requester?.dept_function && (
-              <span className="ml-1 text-xs text-gray-400">
-                ({requester.org_affil}·{requester.dept_function})
-              </span>
-            )}
-          </dd>
-        </div>
-        <div>
-          <dt className="text-xs text-gray-400">담당자</dt>
-          <dd className="mt-0.5 text-gray-800">{assignee ? personLabel(assignee) : '미배정'}</dd>
-        </div>
-        <div>
-          <dt className="text-xs text-gray-400">접수일</dt>
-          <dd className="mt-0.5 text-gray-800">{fmtDateTime(v.created_at)}</dd>
-        </div>
-      </dl>
+      )}
 
-      {/* 본문 */}
-      <div>
-        <h2 className="text-sm font-semibold text-gray-700">상세내용</h2>
-        <div className="mt-2 whitespace-pre-wrap rounded-lg border border-gray-200 bg-white p-4 text-sm text-gray-800">
-          {v.body || <span className="text-gray-400">내용 없음</span>}
-        </div>
-      </div>
+      {editing ? (
+        /* 수정 폼 (본인 접수건) */
+        <form onSubmit={saveEdit} className="space-y-4 rounded-lg border border-gray-200 bg-white p-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700">
+              제목 <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="text"
+              className={fieldCls}
+              value={editTitle}
+              onChange={(e) => setEditTitle(e.target.value)}
+              maxLength={200}
+            />
+          </div>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <div>
+              <label className="block text-sm font-medium text-gray-700">우선순위</label>
+              <select
+                className={fieldCls}
+                value={editPriority}
+                onChange={(e) => setEditPriority(e.target.value as RequestPriority)}
+              >
+                {PRIORITY_OPTIONS.map((p) => (
+                  <option key={p} value={p}>
+                    {p}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700">공개범위</label>
+              <select
+                className={fieldCls}
+                value={editVisibility}
+                onChange={(e) => setEditVisibility(e.target.value as RequestVisibility)}
+              >
+                {VISIBILITY_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700">
+                희망완료일 <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="date"
+                className={fieldCls}
+                value={editDue}
+                onChange={(e) => setEditDue(e.target.value)}
+              />
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700">
+              상세내용 <span className="text-red-500">*</span>
+            </label>
+            <textarea
+              className={`${fieldCls} min-h-[160px] resize-y`}
+              value={editBody}
+              onChange={(e) => setEditBody(e.target.value)}
+            />
+          </div>
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setEditing(false)}
+              className="rounded-md border border-gray-300 px-4 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+            >
+              취소
+            </button>
+            <button
+              type="submit"
+              disabled={updateRequest.isPending}
+              className="rounded-md bg-brand px-4 py-1.5 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-60"
+            >
+              {updateRequest.isPending ? '저장 중…' : '저장'}
+            </button>
+          </div>
+        </form>
+      ) : (
+        <>
+          {/* 메타 */}
+          <dl className="grid grid-cols-2 gap-x-6 gap-y-3 rounded-lg border border-gray-200 bg-white p-4 text-sm sm:grid-cols-3">
+            <div>
+              <dt className="text-xs text-gray-400">기관</dt>
+              <dd className="mt-0.5 text-gray-800">{v.org}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-gray-400">유형</dt>
+              <dd className="mt-0.5 text-gray-800">{v.type_label}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-gray-400">희망완료일</dt>
+              <dd className="mt-0.5 text-gray-800">{v.desired_due ?? '-'}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-gray-400">요청자</dt>
+              <dd className="mt-0.5 text-gray-800">
+                {personLabel(requester)}
+                {requester?.dept_function && (
+                  <span className="ml-1 text-xs text-gray-400">
+                    ({requester.org_affil}·{requester.dept_function})
+                  </span>
+                )}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs text-gray-400">담당자</dt>
+              <dd className="mt-0.5 text-gray-800">
+                {assignee ? personLabel(assignee) : '미배정'}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs text-gray-400">접수일</dt>
+              <dd className="mt-0.5 text-gray-800">{fmtDateTime(v.created_at)}</dd>
+            </div>
+          </dl>
+
+          {/* 본문 */}
+          <div>
+            <h2 className="text-sm font-semibold text-gray-700">상세내용</h2>
+            <div className="mt-2 whitespace-pre-wrap rounded-lg border border-gray-200 bg-white p-4 text-sm text-gray-800">
+              {v.body || <span className="text-gray-400">내용 없음</span>}
+            </div>
+          </div>
+        </>
+      )}
 
       {/* 첨부 */}
       {attachments && attachments.length > 0 && (

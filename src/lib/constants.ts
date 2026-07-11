@@ -23,6 +23,7 @@ export const STATUS_OPTIONS: RequestStatus[] = [
   '보류',
   '반려',
   '이관',
+  '철회',
 ]
 
 // 상태별 뱃지 색상
@@ -36,6 +37,7 @@ export const STATUS_BADGE: Record<RequestStatus, string> = {
   보류: 'bg-yellow-100 text-yellow-800',
   반려: 'bg-red-100 text-red-700',
   이관: 'bg-teal-100 text-teal-700',
+  철회: 'bg-gray-100 text-gray-400 line-through',
 }
 
 // 기한상태(request_view.due_status)별 뱃지 색상 — 초과·지연·임박 강조
