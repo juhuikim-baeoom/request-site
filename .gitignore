@@ -22,6 +22,9 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
+# tooling state (local only)
+.bkit/
+
 # editor / os
 .vscode/*
 !.vscode/extensions.json

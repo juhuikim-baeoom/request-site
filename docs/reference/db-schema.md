@@ -1,3 +1,13 @@
+---
+title: DB 스키마 설계 (Supabase)
+last_updated: 2026-07-11
+status: Active
+owner: 시스템팀
+diataxis: reference
+ssot_for: 데이터베이스 스키마 · RLS · 트리거 · 뷰
+source_of_truth: schema.sql
+---
+
 # 업무요청 접수·관리 사이트 — DB 스키마 설계 (Supabase)
 
 React + Supabase + Vercel 독립 구축 기준. `schema.sql`을 Supabase SQL Editor에 그대로 실행하면 테이블·권한·트리거·뷰가 한 번에 생성됩니다.
