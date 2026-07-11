@@ -19,10 +19,44 @@ export type Database = {
   }
   public: {
     Tables: {
+      org_directory: {
+        Row: {
+          created_at: string
+          dept: string
+          dept_function: string | null
+          email: string
+          name: string
+          org_affil: Database['public']['Enums']['request_org']
+          role: Database['public']['Enums']['user_role']
+          synced: boolean
+        }
+        Insert: {
+          created_at?: string
+          dept: string
+          dept_function?: string | null
+          email: string
+          name: string
+          org_affil: Database['public']['Enums']['request_org']
+          role?: Database['public']['Enums']['user_role']
+          synced?: boolean
+        }
+        Update: {
+          created_at?: string
+          dept?: string
+          dept_function?: string | null
+          email?: string
+          name?: string
+          org_affil?: Database['public']['Enums']['request_org']
+          role?: Database['public']['Enums']['user_role']
+          synced?: boolean
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           created_at: string
           dept: string | null
+          dept_function: string | null
           email: string
           id: string
           name: string | null
@@ -33,6 +67,7 @@ export type Database = {
         Insert: {
           created_at?: string
           dept?: string | null
+          dept_function?: string | null
           email: string
           id: string
           name?: string | null
@@ -43,6 +78,7 @@ export type Database = {
         Update: {
           created_at?: string
           dept?: string | null
+          dept_function?: string | null
           email?: string
           id?: string
           name?: string | null
@@ -153,6 +189,45 @@ export type Database = {
           },
         ]
       }
+      request_shared_targets: {
+        Row: {
+          created_at: string
+          id: number
+          request_id: number
+          target_type: string
+          target_value: string
+        }
+        Insert: {
+          created_at?: string
+          id?: never
+          request_id: number
+          target_type: string
+          target_value: string
+        }
+        Update: {
+          created_at?: string
+          id?: never
+          request_id?: number
+          target_type?: string
+          target_value?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: 'request_shared_targets_request_id_fkey'
+            columns: ['request_id']
+            isOneToOne: false
+            referencedRelation: 'request_view'
+            referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'request_shared_targets_request_id_fkey'
+            columns: ['request_id']
+            isOneToOne: false
+            referencedRelation: 'requests'
+            referencedColumns: ['id']
+          },
+        ]
+      }
       request_status_history: {
         Row: {
           changed_at: string
@@ -238,6 +313,7 @@ export type Database = {
           priority: Database['public']['Enums']['request_priority']
           requester_dept: string | null
           requester_email: string | null
+          requester_function: string | null
           requester_id: string | null
           requester_name: string | null
           requester_org: Database['public']['Enums']['request_org'] | null
@@ -265,6 +341,7 @@ export type Database = {
           priority?: Database['public']['Enums']['request_priority']
           requester_dept?: string | null
           requester_email?: string | null
+          requester_function?: string | null
           requester_id?: string | null
           requester_name?: string | null
           requester_org?: Database['public']['Enums']['request_org'] | null
@@ -292,6 +369,7 @@ export type Database = {
           priority?: Database['public']['Enums']['request_priority']
           requester_dept?: string | null
           requester_email?: string | null
+          requester_function?: string | null
           requester_id?: string | null
           requester_name?: string | null
           requester_org?: Database['public']['Enums']['request_org'] | null
@@ -420,7 +498,15 @@ export type Database = {
       can_see_request: { Args: { req_id: number }; Returns: boolean }
       is_system: { Args: never; Returns: boolean }
       is_viewer_up: { Args: never; Returns: boolean }
+      list_dept_options: {
+        Args: never
+        Returns: {
+          dept_function: string
+          org_affil: Database['public']['Enums']['request_org']
+        }[]
+      }
       my_dept: { Args: never; Returns: string }
+      my_function: { Args: never; Returns: string }
       my_org: {
         Args: never
         Returns: Database['public']['Enums']['request_org']
@@ -440,7 +526,7 @@ export type Database = {
         | '보류'
         | '반려'
         | '이관'
-      request_visibility: 'private' | 'dept' | 'org' | 'shared'
+      request_visibility: 'private' | 'dept' | 'function' | 'org' | 'shared'
       user_role: 'staff' | 'system' | 'viewer'
     }
     CompositeTypes: {

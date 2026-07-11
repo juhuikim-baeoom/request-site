@@ -10,7 +10,7 @@ create type request_org      as enum ('배움', '배론', '허브', '공통');
 create type request_status   as enum ('접수','확인','진행중','검수대기','재작업','완료','보류','반려','이관');
 create type request_priority as enum ('긴급', '보통', '낮음');
 create type request_source   as enum ('web', 'email');
-create type request_visibility as enum ('private', 'dept', 'org', 'shared');
+create type request_visibility as enum ('private', 'dept', 'function', 'org', 'shared');
 
 -- ---------- 1. 프로필 (auth.users 확장: 역할·소속) ----------
 create table profiles (
@@ -18,8 +18,9 @@ create table profiles (
   email      text unique not null,
   name       text,
   org        text,                                   -- (참고용) 소속 부서/기관 자유 기재
-  dept       text,                                   -- 부서 코드/명 (동일부서 판정)
+  dept       text,                                   -- 부서 코드/명 (레거시, 미사용)
   org_affil  request_org,                            -- 소속 기관 (동일기관 판정): 배움/배론/허브/공통
+  dept_function text,                                -- 직무: 교학팀/상담영업팀/시스템팀/기획마케팅팀/상품개발팀/경영지원팀/원장/임원/그로스전략실
   role       user_role not null default 'staff',
   created_at timestamptz not null default now()
 );
@@ -31,6 +32,7 @@ create table org_directory (
   name       text not null,
   dept       text not null,
   org_affil  request_org not null,
+  dept_function text,                                -- 직무 (profiles.dept_function 로 반영)
   role       user_role not null default 'staff',
   synced     boolean not null default false,          -- 실제 가입되어 profiles로 반영됐는지
   created_at timestamptz not null default now()
@@ -58,8 +60,8 @@ begin
 
   if found then
     -- 사전 등록된 직원: name·dept·org_affil·role 그대로 반영
-    insert into profiles (id, email, name, dept, org_affil, role)
-    values (new.id, new.email, dir.name, dir.dept, dir.org_affil, dir.role)
+    insert into profiles (id, email, name, dept, org_affil, dept_function, role)
+    values (new.id, new.email, dir.name, dir.dept, dir.org_affil, dir.dept_function, dir.role)
     on conflict (id) do nothing;
 
     update org_directory set synced = true where lower(email) = lower(new.email);
@@ -107,8 +109,9 @@ create table requests (
   assignee_id       uuid references profiles(id),      -- 담당(시스템팀)
   status            request_status not null default '접수',
   visibility        request_visibility not null default 'dept',  -- 공개 범위(요청자 선택, 미선택 시 부서)
-  requester_dept    text,                              -- 접수 시점 요청자 부서 스냅샷
+  requester_dept    text,                              -- 접수 시점 요청자 부서 스냅샷(레거시)
   requester_org     request_org,                       -- 접수 시점 요청자 소속기관 스냅샷
+  requester_function text,                             -- 접수 시점 요청자 직무 스냅샷
   desired_due       date,                              -- 희망완료일
   first_completed_at timestamptz,                      -- 1차 완료
   completed_at      timestamptz,                       -- 최종 완료
@@ -162,6 +165,17 @@ create table request_attachments (
 );
 create index idx_attach_request on request_attachments(request_id);
 
+-- ---------- 7. 추가 공유부서 (공개범위 외 지정 공유, 다중) ----------
+create table request_shared_targets (
+  id          bigint generated always as identity primary key,
+  request_id  bigint not null references requests(id) on delete cascade,
+  target_type text not null check (target_type in ('function','dept')),  -- 직무단위 / 기관별 세부부서
+  target_value text not null,                        -- function: '교학팀' / dept: '배움|교학팀'
+  created_at  timestamptz not null default now(),
+  unique (request_id, target_type, target_value)
+);
+create index idx_shared_targets_request on request_shared_targets(request_id);
+
 -- =====================================================================
 --  트리거 / 함수
 -- =====================================================================
@@ -188,15 +202,16 @@ end $$;
 create trigger trg_requests_seq before insert on requests
 for each row execute function gen_seq();
 
--- 접수 시점 요청자 소속(부서·기관) 스냅샷 (요청자 부서 이동해도 접수 당시 기준 유지)
+-- 접수 시점 요청자 소속(부서·기관·직무) 스냅샷 (요청자 이동해도 접수 당시 기준 유지)
 create function snapshot_requester() returns trigger
 language plpgsql security definer set search_path = public as $$
 declare p record;
 begin
   if new.requester_id is not null then
-    select dept, org_affil into p from profiles where id = new.requester_id;
-    new.requester_dept := coalesce(new.requester_dept, p.dept);
-    new.requester_org  := coalesce(new.requester_org, p.org_affil);
+    select dept, org_affil, dept_function into p from profiles where id = new.requester_id;
+    new.requester_dept     := coalesce(new.requester_dept, p.dept);
+    new.requester_org      := coalesce(new.requester_org, p.org_affil);
+    new.requester_function := coalesce(new.requester_function, p.dept_function);
   end if;
   return new;
 end $$;
@@ -228,7 +243,8 @@ for each row execute function on_status_change();
 -- =====================================================================
 --  뷰: 계산 필드(리드타임·기한상태) 포함 보드/대시보드용
 -- =====================================================================
-create view request_view as
+-- security_invoker=on: 조회자의 RLS가 적용되도록 (SECURITY DEFINER 뷰의 RLS 우회 방지)
+create view request_view with (security_invoker = on) as
 select
   r.*,
   t.label           as type_label,
@@ -265,7 +281,24 @@ create function my_org() returns request_org
 language sql stable security definer set search_path = public as $$
   select org_affil from profiles where id = auth.uid();
 $$;
--- 특정 요청을 볼 수 있는지 (공개범위 반영). comments/attachments/history 공용
+create function my_function() returns text
+language sql stable security definer set search_path = public as $$
+  select dept_function from profiles where id = auth.uid();
+$$;
+-- 세부부서(기관×직무) 옵션 목록 — 추가 공유 UI용 (org_directory 기반)
+create function list_dept_options()
+returns table(org_affil request_org, dept_function text)
+language sql stable security definer set search_path = public as $$
+  select distinct org_affil, dept_function
+  from org_directory
+  where dept_function is not null
+  order by org_affil, dept_function;
+$$;
+grant execute on function list_dept_options() to authenticated;
+
+-- 특정 요청을 볼 수 있는지 (공개범위 5단계 + 추가 공유 반영). comments/attachments/history/requests 공용
+--   private=본인 / dept=같은기관·같은직무 / function=같은직무 / org=같은기관 / shared=전직원
+--   + request_shared_targets 지정공유(직무 또는 기관|직무)
 create function can_see_request(req_id bigint) returns boolean
 language sql stable security definer set search_path = public as $$
   select exists (
@@ -273,8 +306,17 @@ language sql stable security definer set search_path = public as $$
       is_viewer_up()
       or r.requester_id = auth.uid()
       or r.visibility = 'shared'
-      or (r.visibility = 'dept' and r.requester_dept is not null and r.requester_dept = my_dept())
-      or (r.visibility = 'org'  and r.requester_org  is not null and r.requester_org  = my_org())
+      or (r.visibility = 'org'      and r.requester_org      is not null and r.requester_org      = my_org())
+      or (r.visibility = 'function' and r.requester_function is not null and r.requester_function = my_function())
+      or (r.visibility = 'dept'     and r.requester_org is not null and r.requester_function is not null
+                                    and r.requester_org = my_org() and r.requester_function = my_function())
+      or exists (
+        select 1 from request_shared_targets st
+        where st.request_id = r.id and (
+          (st.target_type = 'function' and st.target_value = my_function())
+          or (st.target_type = 'dept' and st.target_value = my_org()::text || '|' || my_function())
+        )
+      )
     )
   );
 $$;
@@ -284,6 +326,7 @@ alter table requests               enable row level security;
 alter table request_comments       enable row level security;
 alter table request_status_history enable row level security;
 alter table request_attachments    enable row level security;
+alter table request_shared_targets enable row level security;
 alter table request_types          enable row level security;
 
 -- request_types: 로그인 사용자 모두 읽기
@@ -298,16 +341,9 @@ create policy prof_update_admin on profiles for update to authenticated
   using (is_system()) with check (is_system());
 
 -- requests
---  읽기: 시스템/열람자는 전체, 그 외는 본인 접수건 + 공개범위(visibility)에 따라
---   private=본인만 / dept=같은부서 / org=같은기관 / shared=전직원
+--  읽기: can_see_request 로 단일화 (공개범위 5단계 + 추가 공유). comments/attachments/history와 동일 판정
 create policy req_read on requests for select to authenticated
-  using (
-    is_viewer_up()
-    or requester_id = auth.uid()
-    or visibility = 'shared'
-    or (visibility = 'dept' and requester_dept is not null and requester_dept = my_dept())
-    or (visibility = 'org'  and requester_org  is not null and requester_org  = my_org())
-  );
+  using (can_see_request(id));
 --  등록: 로그인 사용자, 본인 명의로만
 --  (메일 접수 건은 GAS/서버가 service_role 키로 insert → RLS 미적용, source='email')
 create policy req_insert on requests for insert to authenticated
@@ -337,6 +373,24 @@ create policy att_insert on request_attachments for insert to authenticated
   with check (uploaded_by = auth.uid());
 create policy att_delete on request_attachments for delete to authenticated
   using (uploaded_by = auth.uid() or is_system());
+
+-- shared_targets: 요청 접근권 있으면 읽기 / 소유자(접수상태) 또는 시스템팀 추가·삭제
+create policy shared_read on request_shared_targets for select to authenticated
+  using (can_see_request(request_id));
+create policy shared_insert on request_shared_targets for insert to authenticated
+  with check (
+    is_system() or exists (
+      select 1 from requests r
+      where r.id = request_id and r.requester_id = auth.uid() and r.status = '접수'
+    )
+  );
+create policy shared_delete on request_shared_targets for delete to authenticated
+  using (
+    is_system() or exists (
+      select 1 from requests r
+      where r.id = request_id and r.requester_id = auth.uid() and r.status = '접수'
+    )
+  );
 
 -- =====================================================================
 --  Storage 버킷 (첨부)

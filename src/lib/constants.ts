@@ -11,17 +11,35 @@ export const ORG_OPTIONS: RequestOrg[] = ['배움', '배론', '허브', '공통'
 // 우선순위 (request_priority enum)
 export const PRIORITY_OPTIONS: RequestPriority[] = ['긴급', '보통', '낮음']
 
-// 공개범위 (request_visibility enum) — 라벨/설명
+// 공개범위 (request_visibility enum, 5단계) — 라벨/설명
 export const VISIBILITY_OPTIONS: {
   value: RequestVisibility
   label: string
   description: string
 }[] = [
   { value: 'private', label: '본인만', description: '본인과 시스템팀만 볼 수 있습니다.' },
-  { value: 'dept', label: '부서', description: '같은 부서 + 시스템팀이 볼 수 있습니다.' },
-  { value: 'org', label: '기관', description: '같은 소속기관 + 시스템팀이 볼 수 있습니다.' },
-  { value: 'shared', label: '전체', description: '전 직원이 볼 수 있습니다.' },
+  {
+    value: 'dept',
+    label: '부서만 (같은 기관·같은 직무)',
+    description: '같은 기관의 같은 직무 담당자 + 시스템팀.',
+  },
+  {
+    value: 'function',
+    label: '동일 직무 전체',
+    description: '기관과 무관하게 같은 직무 전체 (예: 3개 기관 교학팀).',
+  },
+  { value: 'org', label: '소속기관 전체', description: '같은 소속기관 전원.' },
+  { value: 'shared', label: '전 직원', description: '모든 직원이 볼 수 있습니다.' },
 ]
+
+// 뱃지 등 짧은 라벨
+export const VISIBILITY_SHORT: Record<RequestVisibility, string> = {
+  private: '본인만',
+  dept: '부서만',
+  function: '직무 전체',
+  org: '기관 전체',
+  shared: '전 직원',
+}
 
 // 유형별 상세내용 작성 안내문구 (요구사항 §2)
 export const TYPE_HINTS: Record<RequestTypeCode, string> = {
@@ -29,4 +47,27 @@ export const TYPE_HINTS: Record<RequestTypeCode, string> = {
   feature: '원하는 기능과 사용 목적을 구체적으로 적어주세요.',
   data: '필요한 데이터 항목·기간·형식(엑셀/CSV 등)을 적어주세요.',
   file: '대상 파일과 변경할 내용을 적어주세요.',
+}
+
+// 추가 공유 — 직무 단위(target_type='function') 선택 항목 (큐레이션된 6종)
+export const FUNCTION_TARGETS: string[] = [
+  '교학팀',
+  '상담영업팀',
+  '기획마케팅팀',
+  '상품개발팀',
+  '경영지원팀',
+  '시스템팀',
+]
+
+// 추가 공유 — 세부부서(target_type='dept') 값/라벨 규칙
+//   value: '배움|교학팀' (RLS 매칭용), label: '배움_교학팀' (표시용)
+export function deptTargetValue(org: RequestOrg | string, fn: string): string {
+  return `${org}|${fn}`
+}
+export function deptTargetLabel(org: RequestOrg | string, fn: string): string {
+  return `${org}_${fn}`
+}
+export function parseDeptTargetValue(value: string): { org: string; fn: string } {
+  const [org, fn] = value.split('|')
+  return { org: org ?? '', fn: fn ?? '' }
 }

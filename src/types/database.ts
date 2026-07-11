@@ -30,16 +30,26 @@ export type DueStatus =
   | '여유'
   | RequestStatus
 
+// 추가 공유부서 대상 유형
+export type SharedTargetType = 'function' | 'dept'
+
 // ---------- Row 타입 ----------
 export type Profile = Tables['profiles']['Row']
+export type OrgDirectory = Tables['org_directory']['Row']
 export type RequestType = Tables['request_types']['Row']
 export type RequestRow = Tables['requests']['Row']
 export type RequestComment = Tables['request_comments']['Row']
 export type RequestStatusHistory = Tables['request_status_history']['Row']
 export type RequestAttachment = Tables['request_attachments']['Row']
+export type RequestSharedTarget = Tables['request_shared_targets']['Row']
 export type RequestView = Views['request_view']['Row']
+
+// list_dept_options() RPC 반환 항목 (기관×직무 조합)
+export type DeptOption =
+  Database['public']['Functions']['list_dept_options']['Returns'][number]
 
 // ---------- Insert 타입 (필요 시) ----------
 export type RequestInsert = Tables['requests']['Insert']
 export type RequestCommentInsert = Tables['request_comments']['Insert']
 export type RequestAttachmentInsert = Tables['request_attachments']['Insert']
+export type RequestSharedTargetInsert = Tables['request_shared_targets']['Insert']
