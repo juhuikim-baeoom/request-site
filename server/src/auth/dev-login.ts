@@ -14,7 +14,7 @@ export async function devLoginRoutes(app: FastifyInstance) {
       reply.code(500).send({ error: 'dev 유저 없음 — npm run db:seed 실행 필요' })
       return
     }
-    setSession(reply, u.id)
+    await setSession(reply, u.id)
     return {
       user: {
         id: u.id, email: u.email, name: u.name,

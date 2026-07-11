@@ -1,5 +1,5 @@
 import { mkdir, writeFile } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { join, resolve, sep } from 'node:path'
 import { randomUUID } from 'node:crypto'
 
 const ROOT = resolve(process.cwd(), 'uploads')
@@ -21,6 +21,7 @@ export async function saveUpload(requestId: number, fileName: string, buf: Buffe
 
 export function resolveUpload(rel: string): string {
   const abs = resolve(ROOT, rel)
-  if (!abs.startsWith(ROOT)) throw new Error('경로 이탈')  // path traversal 방지
+  // 구분자까지 포함해 검사 (ROOT='/a/uploads' 일 때 '/a/uploads-evil' 우회 방지)
+  if (abs !== ROOT && !abs.startsWith(ROOT + sep)) throw new Error('경로 이탈')
   return abs
 }

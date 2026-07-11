@@ -11,7 +11,9 @@ export class DomainNotAllowedError extends Error {
 export async function upsertUserFromEmail(
   email: string, name: string | null, googleSub: string | null,
 ): Promise<{ id: string }> {
-  const domain = email.split('@')[1]?.toLowerCase()
+  // 정확히 하나의 '@'만 허용 (x@baeoom.com@evil.com 같은 우회 차단)
+  const parts = email.split('@')
+  const domain = parts.length === 2 ? parts[1]?.toLowerCase() : undefined
   if (!domain || !ALLOWED.includes(domain)) throw new DomainNotAllowedError()
 
   const existing = await db.query.users.findFirst({ where: eq(users.email, email) })

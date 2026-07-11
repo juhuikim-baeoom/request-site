@@ -1,6 +1,8 @@
 import {
   pgEnum, pgTable, uuid, text, integer, bigint, boolean, timestamp, date, index, unique,
+  uniqueIndex, type AnyPgColumn,
 } from 'drizzle-orm/pg-core'
+import { sql } from 'drizzle-orm'
 
 export const userRole = pgEnum('user_role', ['staff', 'system', 'viewer'])
 export const requestOrg = pgEnum('request_org', ['배움', '배론', '허브', '공통'])
@@ -25,6 +27,16 @@ export const users = pgTable('users', {
   role: userRole('role').notNull().default('staff'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
+
+// 서버측 세션 저장소 — 쿠키에는 랜덤 토큰만 저장(사용자 id 아님), 로그아웃/무효화 가능
+export const sessions = pgTable('sessions', {
+  id: text('id').primaryKey(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+}, (t) => ({
+  userIdx: index('idx_sessions_user').on(t.userId),
+}))
 
 export const orgDirectory = pgTable('org_directory', {
   email: text('email').primaryKey(),
@@ -66,7 +78,8 @@ export const requests = pgTable('requests', {
   firstCompletedAt: timestamp('first_completed_at', { withTimezone: true }),
   completedAt: timestamp('completed_at', { withTimezone: true }),
   reworkCount: integer('rework_count').notNull().default(0),
-  parentRequestId: bigint('parent_request_id', { mode: 'number' }),
+  parentRequestId: bigint('parent_request_id', { mode: 'number' })
+    .references((): AnyPgColumn => requests.id),
   sourceThreadId: text('source_thread_id'),
   isLocked: boolean('is_locked').notNull().default(false),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -78,6 +91,9 @@ export const requests = pgTable('requests', {
   requesterIdx: index('idx_requests_requester').on(t.requesterId),
   createdIdx: index('idx_requests_created').on(t.createdAt),
   parentIdx: index('idx_requests_parent').on(t.parentRequestId),
+  // 메일 스레드 중복 접수 방지 (원본 schema.sql의 부분 UNIQUE 인덱스 이식)
+  threadIdx: uniqueIndex('idx_requests_thread').on(t.sourceThreadId)
+    .where(sql`source_thread_id is not null`),
 }))
 
 export const requestComments = pgTable('request_comments', {

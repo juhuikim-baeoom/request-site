@@ -7,8 +7,8 @@ export async function authRoutes(app: FastifyInstance) {
     return { user }
   })
 
-  app.post('/api/auth/logout', async (_request, reply) => {
-    clearSession(reply)
+  app.post('/api/auth/logout', async (request, reply) => {
+    await clearSession(reply, request)
     return { ok: true }
   })
 }

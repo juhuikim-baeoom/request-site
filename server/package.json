@@ -18,7 +18,9 @@
     "test:api": "tsx scripts/test-api-list.ts",
     "test:api-detail": "tsx scripts/test-api-detail.ts",
     "test:api-write": "tsx scripts/test-api-write.ts",
-    "test:api-attach": "tsx scripts/test-api-attach.ts"
+    "test:api-attach": "tsx scripts/test-api-attach.ts",
+    "test:api-hardening": "tsx scripts/test-api-hardening.ts",
+    "test:attach-authz": "tsx scripts/test-attach-authz.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^10.0.1",
