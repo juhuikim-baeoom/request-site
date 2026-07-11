@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm'
 import { db, withUser } from '../db/client.js'
 import { derivePriority, addBusinessMinutes, type Impact, type Urgency } from '../sla.js'
+import { notify } from './notify.js'
 
 export class AssignError extends Error {
   code: string
@@ -34,10 +35,12 @@ export async function assignRequest({
   )
   const holidaySet = new Set(holidayRows.rows.map((h) => h.holiday_on))
 
+  let notifySeq: string | null = null
+
   await withUser(actorId, async (tx) => {
-    // 같은 트랜잭션 안에서 SELECT … FOR UPDATE로 행 잠금 후 status/urgency/created_at 읽기
-    const cur = await tx.execute<{ status: string; urgency: Urgency; created_at: string }>(
-      sql`select status, urgency, created_at from requests where id = ${reqId} for update`,
+    // 같은 트랜잭션 안에서 SELECT … FOR UPDATE로 행 잠금 후 status/urgency/created_at/seq 읽기
+    const cur = await tx.execute<{ status: string; urgency: Urgency; created_at: string; seq: string | null }>(
+      sql`select status, urgency, created_at, seq from requests where id = ${reqId} for update`,
     )
     const row = cur.rows[0]
     if (!row) {
@@ -84,5 +87,15 @@ export async function assignRequest({
         'CONCURRENT_MODIFICATION',
       )
     }
+
+    // 알림 대상 정보 기록 (트랜잭션 커밋 후 발송)
+    if (assigneeId !== actorId) {
+      notifySeq = row.seq ?? String(reqId)
+    }
   })
+
+  // 트랜잭션 커밋 후 best-effort 알림 발송
+  if (notifySeq !== null) {
+    void notify(assigneeId, 'assigned', reqId, `요청 ${notifySeq} 담당자로 배정되었습니다`)
+  }
 }

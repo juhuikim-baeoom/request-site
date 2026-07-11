@@ -165,6 +165,18 @@ export const requestAttachments = pgTable('request_attachments', {
   requestIdx: index('idx_attach_request').on(t.requestId),
 }))
 
+export const notifications = pgTable('notifications', {
+  id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  type: text('type').notNull(),
+  requestId: bigint('request_id', { mode: 'number' }).references(() => requests.id, { onDelete: 'cascade' }),
+  message: text('message').notNull(),
+  isRead: boolean('is_read').notNull().default(false),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  userReadIdx: index('idx_notifications_user_read').on(t.userId, t.isRead),
+}))
+
 export const requestSharedTargets = pgTable('request_shared_targets', {
   id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
   requestId: bigint('request_id', { mode: 'number' }).notNull().references(() => requests.id, { onDelete: 'cascade' }),

@@ -5,6 +5,7 @@ import { authenticate } from '../auth/session.js'
 import { canSeeRequest, isSystem, canSeeComment } from '../authz.js'
 import { parseId } from '../http.js'
 import type { CurrentUser } from '../types.js'
+import { notify } from '../services/notify.js'
 
 /** 요청 존재 여부와 열람 권한을 함께 판정 */
 async function loadForSee(u: CurrentUser, id: number): Promise<{ found: boolean; ok: boolean }> {
@@ -90,6 +91,12 @@ export async function requestDetailRoutes(app: FastifyInstance) {
       const wantsInternal = request.body?.is_internal === true
       const isInternal = wantsInternal && isSystem(u)
 
+      // 댓글 삽입 전에 요청 메타데이터 조회 (알림 대상 결정용)
+      const reqMeta = await db.execute<{ requester_id: string | null; assignee_id: string | null; seq: string | null }>(
+        sql`select requester_id, assignee_id, seq from requests where id = ${id}`,
+      )
+      const reqRow = reqMeta.rows[0]
+
       const inserted = await withUser(u.id, (tx) =>
         tx.execute<any>(sql`
           insert into request_comments (request_id, author_id, body, is_internal)
@@ -97,6 +104,25 @@ export async function requestDetailRoutes(app: FastifyInstance) {
           returning id
         `),
       )
+
+      // 공개 댓글인 경우에만 알림 발송
+      if (!isInternal && reqRow) {
+        const seq = reqRow.seq ?? String(id)
+        const actorIsSystem = isSystem(u)
+        // 행위자가 시스템/담당이면 requester에게, 행위자가 requester이면 assignee에게
+        if (actorIsSystem || reqRow.assignee_id === u.id) {
+          // 시스템팀 또는 담당자가 댓글 → requester에게 알림
+          if (reqRow.requester_id && reqRow.requester_id !== u.id) {
+            void notify(reqRow.requester_id, 'comment', id, `요청 ${seq}에 새 댓글이 등록되었습니다`)
+          }
+        } else if (reqRow.requester_id === u.id) {
+          // requester가 댓글 → assignee에게 알림
+          if (reqRow.assignee_id && reqRow.assignee_id !== u.id) {
+            void notify(reqRow.assignee_id, 'comment', id, `요청 ${seq}에 새 댓글이 등록되었습니다`)
+          }
+        }
+      }
+
       reply.code(201); return { id: inserted.rows[0].id }
     },
   )

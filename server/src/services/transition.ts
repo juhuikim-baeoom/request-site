@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm'
 import { withUser } from '../db/client.js'
+import { notify } from './notify.js'
 
 export type RequestStatus = '접수' | '진행중' | '보류' | '완료' | '반려' | '철회'
 
@@ -40,10 +41,12 @@ export async function changeStatus({
   reason?: string
   actorId: string
 }): Promise<{ from: RequestStatus }> {
-  return withUser(actorId, async (tx) => {
-    // 같은 트랜잭션 안에서 SELECT … FOR UPDATE로 행 잠금 후 status 읽기
-    const cur = await tx.execute<{ status: RequestStatus }>(
-      sql`select status from requests where id = ${reqId} for update`,
+  let notifyInfo: { requesterId: string; seq: string } | null = null
+
+  const result = await withUser(actorId, async (tx) => {
+    // 같은 트랜잭션 안에서 SELECT … FOR UPDATE로 행 잠금 후 status/requester_id/seq 읽기
+    const cur = await tx.execute<{ status: RequestStatus; requester_id: string | null; seq: string | null }>(
+      sql`select status, requester_id, seq from requests where id = ${reqId} for update`,
     )
     const row = cur.rows[0]
     if (!row) {
@@ -85,6 +88,20 @@ export async function changeStatus({
       )
     }
 
+    // 알림 대상 정보 기록 (트랜잭션 커밋 후 발송)
+    const requesterId = row.requester_id
+    if (requesterId && requesterId !== actorId) {
+      notifyInfo = { requesterId, seq: row.seq ?? String(reqId) }
+    }
+
     return { from }
   })
+
+  // 트랜잭션 커밋 후 best-effort 알림 발송
+  if (notifyInfo !== null) {
+    const { requesterId, seq } = notifyInfo
+    void notify(requesterId, 'status', reqId, `요청 ${seq} 상태가 ${to}로 변경되었습니다`)
+  }
+
+  return result
 }
