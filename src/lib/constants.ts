@@ -26,6 +26,9 @@ export const STATUS_OPTIONS: RequestStatus[] = [
 // 관리 보드 칸반 컬럼 — 철회는 아카이브성이므로 보드에서 제외
 export const BOARD_STATUSES: RequestStatus[] = ['접수', '진행중', '보류', '완료', '반려']
 
+// 열린(진행 중인) 상태 — 내 요청 기본 저장뷰에서 종결 제외 필터에 사용
+export const OPEN_STATUSES: RequestStatus[] = ['접수', '진행중', '보류']
+
 // 상태별 뱃지 색상 (진한 배경 + 흰 글자로 한눈에 구분)
 export const STATUS_BADGE: Record<RequestStatus, string> = {
   접수: 'bg-sky-500 text-white',
