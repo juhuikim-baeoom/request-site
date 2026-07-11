@@ -98,6 +98,39 @@ export const VISIBILITY_SHORT: Record<RequestVisibility, string> = {
   shared: '전 직원',
 }
 
+// 긴급도 (urgency_level enum)
+export type Urgency = '높음' | '보통' | '낮음'
+export const URGENCY_OPTIONS: Urgency[] = ['높음', '보통', '낮음']
+
+// 타입별 intake_detail 필드 정의 (서버 계약과 키 정확히 일치)
+export interface IntakeField {
+  key: string
+  label: string
+  placeholder?: string
+  required: true
+}
+
+export const TYPE_FIELDS: Record<RequestTypeCode, IntakeField[]> = {
+  error: [
+    { key: 'screen_url', label: '발생 화면 URL', placeholder: 'https://...', required: true },
+    { key: 'reproduce', label: '재현 방법', placeholder: '재현 절차를 단계별로 적어주세요', required: true },
+    { key: 'occurred_at', label: '발생 시각', placeholder: '예: 2026-07-11 14:30', required: true },
+  ],
+  feature: [
+    { key: 'purpose', label: '사용 목적', placeholder: '이 기능을 어떤 목적으로 사용하시나요?', required: true },
+    { key: 'expected_effect', label: '기대 효과', placeholder: '기능 추가 후 기대되는 효과를 적어주세요', required: true },
+  ],
+  data: [
+    { key: 'items', label: '필요 항목', placeholder: '필요한 데이터 항목을 적어주세요', required: true },
+    { key: 'period', label: '기간', placeholder: '예: 2026-01-01 ~ 2026-06-30', required: true },
+    { key: 'format', label: '형식', placeholder: '엑셀/CSV 등', required: true },
+  ],
+  file: [
+    { key: 'target_file', label: '대상 파일', placeholder: '변경할 파일 경로 또는 이름', required: true },
+    { key: 'change_detail', label: '변경 내용', placeholder: '어떤 내용으로 변경해야 하는지 적어주세요', required: true },
+  ],
+}
+
 // 유형별 상세내용 작성 안내문구 (요구사항 §2)
 export const TYPE_HINTS: Record<RequestTypeCode, string> = {
   error: '증상, 발생 화면 URL, 재현 방법을 함께 적어주세요.',

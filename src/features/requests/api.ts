@@ -203,14 +203,19 @@ export interface SharedTargetInput {
   target_value: string
 }
 
+export type { RequestPriority } // re-export so other screens keep working
+
+export type Urgency = '높음' | '보통' | '낮음'
+
 export interface CreateRequestInput {
   org: RequestOrg
   type_code: RequestTypeCode
-  priority: RequestPriority
+  urgency: Urgency
   visibility: RequestVisibility
   title: string
-  body: string
+  body?: string
   desired_due: string // yyyy-mm-dd
+  intake_detail: Record<string, string>
   files: File[]
   sharedTargets: SharedTargetInput[]
 }
@@ -225,11 +230,12 @@ export function useCreateRequest() {
       const request = await apiSend<RequestRow>('POST', '/api/requests', {
         org: input.org,
         type_code: input.type_code,
-        priority: input.priority,
+        urgency: input.urgency,
         visibility: input.visibility,
         title: input.title.trim(),
         body: input.body,
         desired_due: input.desired_due || null,
+        intake_detail: input.intake_detail,
         sharedTargets: input.sharedTargets,
       })
 

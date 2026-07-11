@@ -2,23 +2,22 @@ import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../../auth/useAuth'
 import {
-  PRIORITY_OPTIONS,
+  URGENCY_OPTIONS,
+  TYPE_FIELDS,
   VISIBILITY_OPTIONS,
   TYPE_HINTS,
   FUNCTION_TARGETS,
   deptTargetValue,
   deptTargetLabel,
 } from '../../lib/constants'
-import type {
-  RequestPriority,
-  RequestTypeCode,
-  RequestVisibility,
-} from '../../types/database'
+import type { RequestTypeCode, RequestVisibility } from '../../types/database'
+import type { Urgency } from '../../lib/constants'
 import { useCreateRequest, useDeptOptions, useRequestTypes, type SharedTargetInput } from './api'
 
 const labelCls = 'block text-sm font-medium text-gray-700'
 const fieldCls =
   'mt-1 block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand'
+const errorCls = 'mt-1 text-xs text-red-600'
 
 function toggle(set: Set<string>, value: string): Set<string> {
   const next = new Set(set)
@@ -27,6 +26,8 @@ function toggle(set: Set<string>, value: string): Set<string> {
   return next
 }
 
+type FieldErrors = Record<string, string>
+
 export function RequestForm() {
   const { profile } = useAuth()
   const { data: types } = useRequestTypes()
@@ -34,15 +35,17 @@ export function RequestForm() {
   const createRequest = useCreateRequest()
 
   const [typeCode, setTypeCode] = useState<RequestTypeCode | ''>('')
-  const [priority, setPriority] = useState<RequestPriority>('보통')
+  const [urgency, setUrgency] = useState<Urgency>('보통')
   const [visibility, setVisibility] = useState<RequestVisibility>('dept')
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
   const [desiredDue, setDesiredDue] = useState('')
+  const [intakeValues, setIntakeValues] = useState<Record<string, string>>({})
   const [files, setFiles] = useState<File[]>([])
   const [fnTargets, setFnTargets] = useState<Set<string>>(new Set())
   const [deptTargets, setDeptTargets] = useState<Set<string>>(new Set())
-  const [error, setError] = useState<string | null>(null)
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({})
+  const [submitError, setSubmitError] = useState<string | null>(null)
   const [createdSeq, setCreatedSeq] = useState<string | null>(null)
 
   // 요청 대상 기관 = 내 소속기관 (자동). 프로필에 없으면 접수 불가.
@@ -52,6 +55,12 @@ export function RequestForm() {
   const visibilityDesc = useMemo(
     () => VISIBILITY_OPTIONS.find((o) => o.value === visibility)?.description,
     [visibility],
+  )
+
+  // 현재 선택된 유형의 intake 필드 목록
+  const activeIntakeFields = useMemo(
+    () => (typeCode ? TYPE_FIELDS[typeCode] : []),
+    [typeCode],
   )
 
   // 세부부서 옵션을 기관별로 그룹핑
@@ -69,52 +78,109 @@ export function RequestForm() {
     return [...groups.entries()]
   }, [deptOptions])
 
+  function handleTypeChange(code: RequestTypeCode | '') {
+    setTypeCode(code)
+    setIntakeValues({}) // 유형 변경 시 intake 값 초기화
+    setFieldErrors({})
+  }
+
+  function setIntakeField(key: string, value: string) {
+    setIntakeValues((prev) => ({ ...prev, [key]: value }))
+    // 값 입력 시 해당 필드 오류 제거
+    if (fieldErrors[key]) {
+      setFieldErrors((prev) => {
+        const next = { ...prev }
+        delete next[key]
+        return next
+      })
+    }
+  }
+
+  function clearFieldError(key: string) {
+    if (fieldErrors[key]) {
+      setFieldErrors((prev) => {
+        const next = { ...prev }
+        delete next[key]
+        return next
+      })
+    }
+  }
+
+  function validate(): FieldErrors {
+    const errors: FieldErrors = {}
+
+    if (!myOrg) errors['org'] = '소속기관 정보가 없습니다. 시스템팀에 문의하세요.'
+    if (!typeCode) errors['type_code'] = '유형을 선택해주세요.'
+    if (!title.trim()) errors['title'] = '제목을 입력해주세요.'
+    if (!desiredDue) errors['desired_due'] = '희망완료일을 선택해주세요.'
+    if (!urgency) errors['urgency'] = '긴급도를 선택해주세요.'
+    if (!visibility) errors['visibility'] = '공개범위를 선택해주세요.'
+
+    // 선택된 유형의 intake 필드 검증
+    for (const field of activeIntakeFields) {
+      if (field.required && !intakeValues[field.key]?.trim()) {
+        errors[`intake_${field.key}`] = `${field.label}을(를) 입력해주세요.`
+      }
+    }
+
+    return errors
+  }
+
   function resetForm() {
     setTypeCode('')
-    setPriority('보통')
+    setUrgency('보통')
     setVisibility('dept')
     setTitle('')
     setBody('')
     setDesiredDue('')
+    setIntakeValues({})
     setFiles([])
     setFnTargets(new Set())
     setDeptTargets(new Set())
+    setFieldErrors({})
+    setSubmitError(null)
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    setError(null)
+    setSubmitError(null)
 
-    if (!myOrg) {
-      setError('소속기관 정보가 없어 접수할 수 없습니다. 시스템팀에 문의하세요.')
+    const errors = validate()
+    if (Object.keys(errors).length > 0) {
+      setFieldErrors(errors)
       return
     }
-    if (!typeCode || !title.trim() || !body.trim() || !desiredDue) {
-      setError('유형·제목·상세내용·희망완료일은 필수입니다.')
-      return
-    }
+
+    if (!myOrg || !typeCode) return // 타입 가드 (validate에서 이미 걸림)
 
     const sharedTargets: SharedTargetInput[] = [
       ...[...fnTargets].map((v) => ({ target_type: 'function' as const, target_value: v })),
       ...[...deptTargets].map((v) => ({ target_type: 'dept' as const, target_value: v })),
     ]
 
+    // intake_detail: 현재 유형의 필드만 포함
+    const intake_detail: Record<string, string> = {}
+    for (const field of activeIntakeFields) {
+      intake_detail[field.key] = intakeValues[field.key]?.trim() ?? ''
+    }
+
     try {
       const request = await createRequest.mutateAsync({
         org: myOrg,
         type_code: typeCode,
-        priority,
+        urgency,
         visibility,
         title,
-        body,
+        body: body || undefined,
         desired_due: desiredDue,
+        intake_detail,
         files,
         sharedTargets,
       })
       setCreatedSeq(request.seq ?? `#${request.id}`)
       resetForm()
     } catch (err) {
-      setError(err instanceof Error ? err.message : '접수 중 오류가 발생했습니다.')
+      setSubmitError(err instanceof Error ? err.message : '접수 중 오류가 발생했습니다.')
     }
   }
 
@@ -159,31 +225,25 @@ export function RequestForm() {
       </div>
       <p className="mt-1 text-sm text-gray-500">업무요청을 작성해 제출하세요.</p>
 
-      <form onSubmit={handleSubmit} className="mt-6 space-y-5">
-        {/* 제목 */}
-        <div>
-          <label className={labelCls}>
-            제목 <span className="text-red-500">*</span>
-          </label>
-          <input
-            type="text"
-            className={fieldCls}
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="요청 제목을 입력하세요"
-            maxLength={200}
-          />
+      {fieldErrors['org'] && (
+        <div
+          role="alert"
+          className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+        >
+          {fieldErrors['org']}
         </div>
+      )}
 
-        {/* 유형 */}
+      <form onSubmit={handleSubmit} className="mt-6 space-y-5">
+        {/* 유형 (타입 우선) */}
         <div>
           <label className={labelCls}>
             유형 <span className="text-red-500">*</span>
           </label>
           <select
-            className={fieldCls}
+            className={`${fieldCls} ${fieldErrors['type_code'] ? 'border-red-400' : ''}`}
             value={typeCode}
-            onChange={(e) => setTypeCode(e.target.value as RequestTypeCode)}
+            onChange={(e) => handleTypeChange(e.target.value as RequestTypeCode | '')}
           >
             <option value="">선택하세요</option>
             {types?.map((t) => (
@@ -192,37 +252,87 @@ export function RequestForm() {
               </option>
             ))}
           </select>
-          {typeHint && <p className="mt-1 text-xs text-brand">{typeHint}</p>}
+          {fieldErrors['type_code'] && <p className={errorCls}>{fieldErrors['type_code']}</p>}
+          {typeHint && !fieldErrors['type_code'] && (
+            <p className="mt-1 text-xs text-brand">{typeHint}</p>
+          )}
         </div>
 
-        {/* 상세내용 (우선 textarea, 이후 에디터로 교체) */}
+        {/* 유형별 intake_detail 필드 (유형 선택 후에만 노출) */}
+        {typeCode && activeIntakeFields.length > 0 && (
+          <div className="space-y-4 rounded-lg border border-blue-100 bg-blue-50 p-4">
+            <p className="text-xs font-semibold text-blue-700">유형별 필수 정보</p>
+            {activeIntakeFields.map((field) => (
+              <div key={field.key}>
+                <label className={`${labelCls} text-blue-900`}>
+                  {field.label} <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  className={`${fieldCls} ${fieldErrors[`intake_${field.key}`] ? 'border-red-400' : 'border-blue-200 focus:border-brand'}`}
+                  value={intakeValues[field.key] ?? ''}
+                  onChange={(e) => setIntakeField(field.key, e.target.value)}
+                  placeholder={field.placeholder}
+                />
+                {fieldErrors[`intake_${field.key}`] && (
+                  <p className={errorCls}>{fieldErrors[`intake_${field.key}`]}</p>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* 제목 */}
         <div>
           <label className={labelCls}>
-            상세내용 <span className="text-red-500">*</span>
+            제목 <span className="text-red-500">*</span>
           </label>
+          <input
+            type="text"
+            className={`${fieldCls} ${fieldErrors['title'] ? 'border-red-400' : ''}`}
+            value={title}
+            onChange={(e) => {
+              setTitle(e.target.value)
+              clearFieldError('title')
+            }}
+            placeholder="요청 제목을 입력하세요"
+            maxLength={200}
+          />
+          {fieldErrors['title'] && <p className={errorCls}>{fieldErrors['title']}</p>}
+        </div>
+
+        {/* 상세내용 */}
+        <div>
+          <label className={labelCls}>상세내용</label>
           <textarea
-            className={`${fieldCls} min-h-[180px] resize-y`}
+            className={`${fieldCls} min-h-[140px] resize-y`}
             value={body}
             onChange={(e) => setBody(e.target.value)}
-            placeholder={typeHint ?? '요청 내용을 자세히 적어주세요'}
+            placeholder={typeHint ?? '추가로 전달할 내용을 적어주세요 (선택)'}
           />
         </div>
 
-        {/* 우선순위 · 희망완료일 */}
+        {/* 긴급도 · 희망완료일 */}
         <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
           <div>
-            <label className={labelCls}>우선순위</label>
+            <label className={labelCls}>
+              긴급도 <span className="text-red-500">*</span>
+            </label>
             <select
-              className={fieldCls}
-              value={priority}
-              onChange={(e) => setPriority(e.target.value as RequestPriority)}
+              className={`${fieldCls} ${fieldErrors['urgency'] ? 'border-red-400' : ''}`}
+              value={urgency}
+              onChange={(e) => {
+                setUrgency(e.target.value as Urgency)
+                clearFieldError('urgency')
+              }}
             >
-              {PRIORITY_OPTIONS.map((p) => (
-                <option key={p} value={p}>
-                  {p}
+              {URGENCY_OPTIONS.map((u) => (
+                <option key={u} value={u}>
+                  {u}
                 </option>
               ))}
             </select>
+            {fieldErrors['urgency'] && <p className={errorCls}>{fieldErrors['urgency']}</p>}
           </div>
           <div>
             <label className={labelCls}>
@@ -230,20 +340,31 @@ export function RequestForm() {
             </label>
             <input
               type="date"
-              className={fieldCls}
+              className={`${fieldCls} ${fieldErrors['desired_due'] ? 'border-red-400' : ''}`}
               value={desiredDue}
-              onChange={(e) => setDesiredDue(e.target.value)}
+              onChange={(e) => {
+                setDesiredDue(e.target.value)
+                clearFieldError('desired_due')
+              }}
             />
+            {fieldErrors['desired_due'] && (
+              <p className={errorCls}>{fieldErrors['desired_due']}</p>
+            )}
           </div>
         </div>
 
         {/* 공개범위 */}
         <div>
-          <label className={labelCls}>공개범위</label>
+          <label className={labelCls}>
+            공개범위 <span className="text-red-500">*</span>
+          </label>
           <select
-            className={`${fieldCls} sm:w-72`}
+            className={`${fieldCls} sm:w-72 ${fieldErrors['visibility'] ? 'border-red-400' : ''}`}
             value={visibility}
-            onChange={(e) => setVisibility(e.target.value as RequestVisibility)}
+            onChange={(e) => {
+              setVisibility(e.target.value as RequestVisibility)
+              clearFieldError('visibility')
+            }}
           >
             {VISIBILITY_OPTIONS.map((o) => (
               <option key={o.value} value={o.value}>
@@ -251,7 +372,10 @@ export function RequestForm() {
               </option>
             ))}
           </select>
-          {visibilityDesc && <p className="mt-1 text-xs text-gray-500">{visibilityDesc}</p>}
+          {fieldErrors['visibility'] && <p className={errorCls}>{fieldErrors['visibility']}</p>}
+          {visibilityDesc && !fieldErrors['visibility'] && (
+            <p className="mt-1 text-xs text-gray-500">{visibilityDesc}</p>
+          )}
         </div>
 
         {/* 추가 공유 (선택) */}
@@ -330,12 +454,12 @@ export function RequestForm() {
           )}
         </div>
 
-        {error && (
+        {submitError && (
           <div
             role="alert"
             className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
           >
-            {error}
+            {submitError}
           </div>
         )}
 

@@ -1,6 +1,6 @@
 ---
 title: DB 스키마 설계 (Drizzle + Postgres)
-last_updated: 2026-07-11
+last_updated: 2026-07-12
 status: Active
 owner: 시스템팀
 diataxis: reference
