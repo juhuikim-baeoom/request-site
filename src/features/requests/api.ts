@@ -18,6 +18,9 @@ import type {
 } from '../../types/database'
 import type { Urgency } from '../../lib/constants'
 
+// ---------- 임팩트(배정 시) ----------
+export type ImpactLevel = '높음' | '보통' | '낮음'
+
 /** 내가 볼 수 있는 요청 목록 (공개범위 적용). 최신순 */
 export function useRequestViews() {
   return useQuery({
@@ -167,7 +170,132 @@ export function useAllProfiles() {
   })
 }
 
-/** 관리 보드용 상태/담당자 변경 (시스템팀). 상태 변경 시 이력·완료일은 트리거가 처리 */
+/**
+ * 상태 변경 훅 — PATCH /api/requests/:id { status, reason? }
+ * 낙관적 업데이트: onMutate 에서 캐시 즉시 반영, 실패 시 롤백.
+ */
+export function useChangeStatus() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (vars: { id: number; status: RequestStatus; reason?: string }) =>
+      apiSend('PATCH', `/api/requests/${vars.id}`, {
+        status: vars.status,
+        ...(vars.reason != null ? { reason: vars.reason } : {}),
+      }),
+    onMutate: async (vars) => {
+      await queryClient.cancelQueries({ queryKey: ['requests'] })
+      const previous = queryClient.getQueryData<RequestView[]>(['requests', 'view'])
+      queryClient.setQueryData<RequestView[]>(['requests', 'view'], (old) =>
+        old?.map((r) => (r.id === vars.id ? { ...r, status: vars.status } : r)),
+      )
+      return { previous }
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.previous) {
+        queryClient.setQueryData(['requests', 'view'], ctx.previous)
+      }
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ['requests'] })
+    },
+  })
+}
+
+/** 담당자 변경 훅 — PATCH /api/requests/:id { assignee_id } (status 와 분리) */
+export function useChangeAssignee() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (vars: { id: number; assignee_id: string | null }) =>
+      apiSend('PATCH', `/api/requests/${vars.id}`, { assignee_id: vars.assignee_id }),
+    onMutate: async (vars) => {
+      await queryClient.cancelQueries({ queryKey: ['requests'] })
+      const previous = queryClient.getQueryData<RequestView[]>(['requests', 'view'])
+      queryClient.setQueryData<RequestView[]>(['requests', 'view'], (old) =>
+        old?.map((r) =>
+          r.id === vars.id ? { ...r, assignee_id: vars.assignee_id } : r,
+        ),
+      )
+      return { previous }
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.previous) {
+        queryClient.setQueryData(['requests', 'view'], ctx.previous)
+      }
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ['requests'] })
+    },
+  })
+}
+
+/**
+ * 배정 훅 — POST /api/requests/:id/assign { assigneeId, impact }
+ * 접수 → 진행중 전이 + priority_level·assigned_at·resolution_due_at 서버 세팅.
+ * 시스템팀 전용.
+ */
+export function useAssignRequest() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (vars: { id: number; assigneeId: string; impact: ImpactLevel }) =>
+      apiSend('POST', `/api/requests/${vars.id}/assign`, {
+        assigneeId: vars.assigneeId,
+        impact: vars.impact,
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['requests'] })
+    },
+  })
+}
+
+export interface BulkUpdateInput {
+  ids: number[]
+  patch: { status: RequestStatus; reason?: string } | { assignee_id: string | null }
+}
+
+export interface BulkUpdateResult {
+  succeeded: number[]
+  failed: Array<{ id: number; error: string }>
+  /** 낙관적 업데이트 undo 를 위해 직전 캐시 스냅샷 반환 */
+  previous: RequestView[] | undefined
+}
+
+/**
+ * 벌크 업데이트 훅 — 선택된 id 들에 순차 PATCH.
+ * 부분 실패를 취합해 BulkUpdateResult 로 반환.
+ * undo 용으로 직전 캐시 스냅샷(previous)도 함께 반환.
+ */
+export function useBulkUpdate() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (input: BulkUpdateInput): Promise<BulkUpdateResult> => {
+      const previous = queryClient.getQueryData<RequestView[]>(['requests', 'view'])
+      const succeeded: number[] = []
+      const failed: Array<{ id: number; error: string }> = []
+
+      for (const id of input.ids) {
+        try {
+          await apiSend('PATCH', `/api/requests/${id}`, input.patch)
+          succeeded.push(id)
+        } catch (err) {
+          failed.push({
+            id,
+            error: err instanceof Error ? err.message : String(err),
+          })
+        }
+      }
+
+      return { succeeded, failed, previous }
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ['requests'] })
+    },
+  })
+}
+
+/**
+ * @deprecated useChangeStatus / useChangeAssignee 로 분리됨. 하위 호환용으로 유지.
+ * ManageBoard 등 기존 호출부가 컴파일 유지되도록 남김.
+ */
 export function useBoardUpdate() {
   const queryClient = useQueryClient()
   return useMutation({

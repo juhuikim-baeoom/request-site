@@ -14,7 +14,14 @@ type Enums = Database['public']['Enums']
 // ---------- ENUM ----------
 export type UserRole = Enums['user_role']
 export type RequestOrg = Enums['request_org']
-export type RequestStatus = Enums['request_status']
+
+// P1 확정 6종 상태 (서버 API 계약과 동일)
+export type RequestStatus = '접수' | '진행중' | '보류' | '완료' | '반려' | '철회'
+
+// P1 배정 시 서버가 산정하는 우선순위 레벨
+export type PriorityLevel = 'P1' | 'P2' | 'P3' | 'P4'
+
+/** @deprecated P1 서버는 priority_level 사용. 하위 호환용으로 유지. */
 export type RequestPriority = Enums['request_priority']
 export type RequestSource = Enums['request_source']
 export type RequestVisibility = Enums['request_visibility']

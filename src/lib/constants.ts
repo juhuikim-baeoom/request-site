@@ -2,6 +2,7 @@ import type {
   RequestOrg,
   RequestPriority,
   RequestStatus,
+  PriorityLevel,
   RequestVisibility,
   RequestTypeCode,
 } from '../types/database'
@@ -9,38 +10,51 @@ import type {
 // 기관 (request_org enum)
 export const ORG_OPTIONS: RequestOrg[] = ['배움', '배론', '허브', '공통']
 
-// 우선순위 (request_priority enum)
+// 우선순위 (request_priority enum) — 하위 호환용
 export const PRIORITY_OPTIONS: RequestPriority[] = ['긴급', '보통', '낮음']
 
-// 선택 가능한 상태 (request_status enum에서 '재작업' 제외 — 운영상 미사용)
-// (STATUS_BADGE에는 과거 데이터 대비 '재작업' 색상 유지)
+// P1 확정 6종 상태 (서버 API 계약과 동일)
 export const STATUS_OPTIONS: RequestStatus[] = [
   '접수',
-  '확인',
   '진행중',
-  '검수대기',
-  '완료',
   '보류',
+  '완료',
   '반려',
-  '이관',
   '철회',
 ]
 
-// 관리 보드 칸반 컬럼 (선택 가능 상태와 동일)
-export const BOARD_STATUSES: RequestStatus[] = STATUS_OPTIONS
+// 관리 보드 칸반 컬럼 — 철회는 아카이브성이므로 보드에서 제외
+export const BOARD_STATUSES: RequestStatus[] = ['접수', '진행중', '보류', '완료', '반려']
 
 // 상태별 뱃지 색상 (진한 배경 + 흰 글자로 한눈에 구분)
 export const STATUS_BADGE: Record<RequestStatus, string> = {
   접수: 'bg-sky-500 text-white',
-  확인: 'bg-blue-600 text-white',
   진행중: 'bg-indigo-600 text-white',
-  검수대기: 'bg-violet-600 text-white',
-  재작업: 'bg-orange-500 text-white',
-  완료: 'bg-green-600 text-white',
   보류: 'bg-amber-500 text-white',
+  완료: 'bg-green-600 text-white',
   반려: 'bg-red-600 text-white',
-  이관: 'bg-teal-600 text-white',
   철회: 'bg-gray-400 text-white line-through',
+}
+
+// P1~P4 레벨 뱃지 색상 (진한 배경 + 흰 글자, 접근성 대비 4.5:1 이상)
+export const PRIORITY_LEVEL_BADGE: Record<PriorityLevel, string> = {
+  P1: 'bg-red-700 text-white',
+  P2: 'bg-orange-500 text-white',
+  P3: 'bg-blue-600 text-white',
+  P4: 'bg-gray-500 text-white',
+}
+
+// WIP 임계 — 칸반 컬럼당 카드 수가 이 값을 초과하면 경고 표시
+export const WIP_LIMIT = 12
+
+// 허용 전이 매트릭스 (서버 API 계약 §PATCH /api/requests/:id 와 동일)
+export const ALLOWED_TRANSITIONS: Record<RequestStatus, RequestStatus[]> = {
+  접수: ['진행중', '반려', '철회'],
+  진행중: ['완료', '보류', '반려'],
+  보류: ['진행중'],
+  완료: ['진행중'], // 재작업
+  반려: [],
+  철회: [],
 }
 
 // 기한상태(request_view.due_status)별 뱃지 색상 — 초과·지연·임박 강조

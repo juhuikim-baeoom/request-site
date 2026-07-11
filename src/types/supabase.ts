@@ -300,26 +300,36 @@ export type Database = {
       }
       requests: {
         Row: {
+          assigned_at: string | null
           assignee_id: string | null
           body: string | null
           completed_at: string | null
           created_at: string
           desired_due: string | null
+          final_resolved_at: string | null
           first_completed_at: string | null
+          first_resolved_at: string | null
           id: number
+          impact: Database['public']['Enums']['urgency_level'] | null
           intake_detail: Json | null
           is_locked: boolean
           org: Database['public']['Enums']['request_org']
           parent_request_id: number | null
+          /** @deprecated P1 서버는 priority_level 사용. 하위 호환용으로 유지. */
           priority: Database['public']['Enums']['request_priority']
+          priority_level: string | null
           requester_dept: string | null
           requester_email: string | null
           requester_function: string | null
           requester_id: string | null
           requester_name: string | null
           requester_org: Database['public']['Enums']['request_org'] | null
+          resolution_due_at: string | null
+          response_due_at: string | null
           rework_count: number
           seq: string | null
+          sla_resolution_breached: boolean | null
+          sla_response_breached: boolean | null
           source: Database['public']['Enums']['request_source']
           source_thread_id: string | null
           status: Database['public']['Enums']['request_status']
@@ -330,26 +340,35 @@ export type Database = {
           visibility: Database['public']['Enums']['request_visibility']
         }
         Insert: {
+          assigned_at?: string | null
           assignee_id?: string | null
           body?: string | null
           completed_at?: string | null
           created_at?: string
           desired_due?: string | null
+          final_resolved_at?: string | null
           first_completed_at?: string | null
+          first_resolved_at?: string | null
           id?: never
+          impact?: Database['public']['Enums']['urgency_level'] | null
           intake_detail?: Json | null
           is_locked?: boolean
           org: Database['public']['Enums']['request_org']
           parent_request_id?: number | null
           priority?: Database['public']['Enums']['request_priority']
+          priority_level?: string | null
           requester_dept?: string | null
           requester_email?: string | null
           requester_function?: string | null
           requester_id?: string | null
           requester_name?: string | null
           requester_org?: Database['public']['Enums']['request_org'] | null
+          resolution_due_at?: string | null
+          response_due_at?: string | null
           rework_count?: number
           seq?: string | null
+          sla_resolution_breached?: boolean | null
+          sla_response_breached?: boolean | null
           source?: Database['public']['Enums']['request_source']
           source_thread_id?: string | null
           status?: Database['public']['Enums']['request_status']
@@ -360,26 +379,35 @@ export type Database = {
           visibility?: Database['public']['Enums']['request_visibility']
         }
         Update: {
+          assigned_at?: string | null
           assignee_id?: string | null
           body?: string | null
           completed_at?: string | null
           created_at?: string
           desired_due?: string | null
+          final_resolved_at?: string | null
           first_completed_at?: string | null
+          first_resolved_at?: string | null
           id?: never
+          impact?: Database['public']['Enums']['urgency_level'] | null
           intake_detail?: Json | null
           is_locked?: boolean
           org?: Database['public']['Enums']['request_org']
           parent_request_id?: number | null
           priority?: Database['public']['Enums']['request_priority']
+          priority_level?: string | null
           requester_dept?: string | null
           requester_email?: string | null
           requester_function?: string | null
           requester_id?: string | null
           requester_name?: string | null
           requester_org?: Database['public']['Enums']['request_org'] | null
+          resolution_due_at?: string | null
+          response_due_at?: string | null
           rework_count?: number
           seq?: string | null
+          sla_resolution_breached?: boolean | null
+          sla_response_breached?: boolean | null
           source?: Database['public']['Enums']['request_source']
           source_thread_id?: string | null
           status?: Database['public']['Enums']['request_status']
@@ -431,6 +459,7 @@ export type Database = {
     Views: {
       request_view: {
         Row: {
+          assigned_at: string | null
           assignee_id: string | null
           body: string | null
           completed_at: string | null
@@ -438,20 +467,30 @@ export type Database = {
           desired_due: string | null
           due_status: string | null
           final_lead_days: number | null
+          final_resolved_at: string | null
           first_completed_at: string | null
           first_lead_days: number | null
+          first_resolved_at: string | null
           id: number | null
+          impact: Database['public']['Enums']['urgency_level'] | null
+          intake_detail: Json | null
           is_locked: boolean | null
           org: Database['public']['Enums']['request_org'] | null
           parent_request_id: number | null
+          /** @deprecated P1 서버는 priority_level 사용. 하위 호환용으로 유지. */
           priority: Database['public']['Enums']['request_priority'] | null
+          priority_level: string | null
           requester_dept: string | null
           requester_email: string | null
           requester_id: string | null
           requester_name: string | null
           requester_org: Database['public']['Enums']['request_org'] | null
+          resolution_due_at: string | null
+          response_due_at: string | null
           rework_count: number | null
           seq: string | null
+          sla_resolution_breached: boolean | null
+          sla_response_breached: boolean | null
           source: Database['public']['Enums']['request_source'] | null
           source_thread_id: string | null
           status: Database['public']['Enums']['request_status'] | null
@@ -459,6 +498,7 @@ export type Database = {
           type_code: string | null
           type_label: string | null
           updated_at: string | null
+          urgency: Database['public']['Enums']['urgency_level'] | null
           visibility: Database['public']['Enums']['request_visibility'] | null
         }
         Relationships: [
@@ -524,14 +564,10 @@ export type Database = {
       request_source: 'web' | 'email'
       request_status:
         | '접수'
-        | '확인'
         | '진행중'
-        | '검수대기'
-        | '재작업'
-        | '완료'
         | '보류'
+        | '완료'
         | '반려'
-        | '이관'
         | '철회'
       request_visibility: 'private' | 'dept' | 'function' | 'org' | 'shared'
       urgency_level: '높음' | '보통' | '낮음'
