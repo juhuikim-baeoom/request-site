@@ -4,6 +4,18 @@
 
 ## [Unreleased]
 
+### Added
+- **관리 보드 P3 BoardUI 재설계** (`src/features/board/ManageBoard.tsx`)
+  - 트리아지 존: `status='접수' && assignee=null` 건을 상단 미배정 큐로 표시. 배정 모달(담당자 + 영향도 + 예상 priority_level 미리보기) → `useAssignRequest`.
+  - 칸반 5컬럼(접수·진행중·보류·완료·반려): 헤더 건수, WIP 한도(12) 초과 시 amber 강조.
+  - 카드: priority_level 뱃지(P1~P4/미정), seq, 제목, 기관, 유형, SLA(due_status + D-N 상대표기), 담당자 인라인 선택, 재작업 뱃지.
+  - HTML5 드래그 드롭 상태 전이: `ALLOWED_TRANSITIONS` 선검증, 불허 시 토스트, `useChangeStatus` 낙관적 업데이트+실패 롤백. 접수→진행중 드롭은 배정 모달 트리거.
+  - 인라인 담당자 변경: `useChangeAssignee`로 status PATCH와 분리.
+  - 종결 포함 토글(완료·반려·철회 기본 제외) + 기간 없이 단순 토글.
+  - 벌크 선택+일괄 상태/담당자 변경(`useBulkUpdate`) + undo 토스트.
+  - 저장뷰: 필터 상태 localStorage 자동 저장/복원(`manage_board_filters_v1`).
+  - 리스트 뷰 토글 유지 + 전체 선택 체크박스.
+
 ### Fixed
 - **supabase.ts 타입 갱신**: `requests` 테이블에 `urgency` (`urgency_level` enum) · `intake_detail` (jsonb) 컬럼 추가, `urgency_level` enum (`높음`/`보통`/`낮음`) Enums 섹션에 추가.
 - **intake 필드 오류 미해제 버그**: `setIntakeField` 내부에서 오류 키를 `intake_${key}` 형식으로 조회하도록 수정 — 값 입력 시 붉은 테두리·오류 메시지가 정상 해제됨.
