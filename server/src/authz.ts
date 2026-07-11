@@ -4,6 +4,22 @@ import type { CurrentUser } from './types.js'
 export function isSystem(u: CurrentUser): boolean {
   return u.role === 'system'
 }
+
+interface CommentRef {
+  isInternal: boolean
+  authorId: string | null
+}
+
+/**
+ * 댓글 열람 권한.
+ * 내부메모(is_internal=true)는 시스템팀 또는 작성자에게만 보인다.
+ */
+export function canSeeComment(u: CurrentUser, comment: CommentRef): boolean {
+  if (!comment.isInternal) return true
+  if (isSystem(u)) return true
+  if (comment.authorId && comment.authorId === u.id) return true
+  return false
+}
 export function isViewerUp(u: CurrentUser): boolean {
   return u.role === 'system' || u.role === 'viewer'
 }

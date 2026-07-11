@@ -15,6 +15,7 @@ const create = await app.inject({
   payload: {
     org: '공통', type_code: 'feature', priority: '보통', visibility: 'dept',
     title: 'write 테스트', body: '<p>본문</p>', desired_due: null,
+    intake_detail: { purpose: '업무 효율화', expected_effect: '처리 속도 향상' },
     sharedTargets: [{ target_type: 'function', target_value: '교학팀' }],
   },
 })

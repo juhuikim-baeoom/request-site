@@ -21,7 +21,11 @@
     "test:api-attach": "tsx scripts/test-api-attach.ts",
     "test:api-hardening": "tsx scripts/test-api-hardening.ts",
     "test:attach-authz": "tsx scripts/test-attach-authz.ts",
-    "test:sla": "tsx scripts/test-sla.ts"
+    "test:sla": "tsx scripts/test-sla.ts",
+    "test:transition": "tsx scripts/test-transition.ts",
+    "test:assign": "tsx scripts/test-assign.ts",
+    "test:intake": "tsx scripts/test-intake.ts",
+    "test:comment-internal": "tsx scripts/test-comment-internal.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^10.0.1",
