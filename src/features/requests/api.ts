@@ -55,8 +55,14 @@ export interface PersonRef {
   org_affil: RequestOrg | null
 }
 
+/** request_view + csat 필드 (서버가 select * from request_view 반환) */
+export interface RequestViewWithCsat extends RequestView {
+  csat_rating?: number | null
+  csat_comment?: string | null
+}
+
 export interface RequestDetailData {
-  view: RequestView
+  view: RequestViewWithCsat
   requester: PersonRef | null
   assignee: PersonRef | null
   sharedTargets: RequestSharedTarget[]
@@ -72,6 +78,7 @@ export function useRequestDetail(id: number) {
 
 export interface CommentWithAuthor extends RequestComment {
   author: { name: string | null } | null
+  is_internal?: boolean
 }
 
 export function useRequestComments(id: number) {
@@ -107,13 +114,74 @@ export function getAttachmentUrl(attachmentId: number): string {
   return `${API_BASE}/api/attachments/${attachmentId}/download`
 }
 
+export interface AddCommentInput {
+  body: string
+  is_internal?: boolean
+}
+
+export interface AddCommentResult {
+  id: number
+}
+
 export function useAddComment(requestId: number) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (body: string) =>
-      apiSend('POST', `/api/requests/${requestId}/comments`, { body: body.trim() }),
+    mutationFn: (input: AddCommentInput | string): Promise<AddCommentResult> => {
+      if (typeof input === 'string') {
+        return apiSend('POST', `/api/requests/${requestId}/comments`, { body: input.trim() })
+      }
+      return apiSend('POST', `/api/requests/${requestId}/comments`, {
+        body: input.body.trim(),
+        ...(input.is_internal !== undefined ? { is_internal: input.is_internal } : {}),
+      })
+    },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['requests', 'comments', requestId] })
+    },
+  })
+}
+
+/** 댓글에 연결된 첨부파일 업로드 (comment_id 링크) */
+export function useUploadCommentAttachment(requestId: number) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (vars: { file: File; commentId: number }): Promise<RequestAttachment> => {
+      const fd = new FormData()
+      fd.append('file', vars.file, vars.file.name)
+      fd.append('comment_id', String(vars.commentId))
+      return apiUpload<RequestAttachment>(`/api/requests/${requestId}/attachments`, fd)
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['requests', 'attachments', requestId] })
+    },
+  })
+}
+
+/** CSAT 제출 (요청자, status='완료'일 때) */
+export function useCsat(requestId: number) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (vars: { rating: -1 | 1; comment?: string }) =>
+      apiSend<{ ok: boolean }>('POST', `/api/requests/${requestId}/csat`, vars),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['requests', 'detail', requestId] })
+    },
+  })
+}
+
+/** 재작업: 완료→진행중 전이 (시스템팀 전용) */
+export function useRework(requestId: number) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (vars: { reason?: string }) =>
+      apiSend('PATCH', `/api/requests/${requestId}`, {
+        status: '진행중' as RequestStatus,
+        ...(vars.reason ? { reason: vars.reason } : {}),
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['requests', 'detail', requestId] })
+      void queryClient.invalidateQueries({ queryKey: ['requests', 'view'] })
+      void queryClient.invalidateQueries({ queryKey: ['requests', 'history', requestId] })
     },
   })
 }
@@ -122,7 +190,7 @@ export function useAddComment(requestId: number) {
 export interface UpdateRequestInput {
   title?: string
   body?: string
-  priority?: RequestPriority
+  urgency?: Urgency
   visibility?: RequestVisibility
   desired_due?: string | null
 }
