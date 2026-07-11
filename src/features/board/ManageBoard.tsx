@@ -6,6 +6,7 @@ import {
   useCallback,
   useEffect,
 } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { Badge } from '../../components/Badge'
 import {
@@ -231,6 +232,7 @@ export function ManageBoard() {
   const { data: rows, isLoading } = useRequestViews()
   const { data: profiles } = useAllProfiles()
   const { data: types } = useRequestTypes()
+  const queryClient = useQueryClient()
   const changeStatus = useChangeStatus()
   const changeAssignee = useChangeAssignee()
   const bulkUpdate = useBulkUpdate()
@@ -263,6 +265,7 @@ export function ManageBoard() {
   // 벌크 선택
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [bulkStatus, setBulkStatus] = useState<RequestStatus | ''>('')
+  // '__unassigned__' = 미배정 선택, '' = 플레이스홀더(미선택)
   const [bulkAssignee, setBulkAssignee] = useState('')
 
   // 드래그 드롭 상태 (HTML5 dragover/drop API)
@@ -452,7 +455,6 @@ export function ManageBoard() {
   function applyBulkStatus() {
     if (!bulkStatus || selectedIds.size === 0) return
     const ids = [...selectedIds].filter((id): id is number => id != null)
-    const previousRows = rows
     bulkUpdate.mutate(
       { ids, patch: { status: bulkStatus } },
       {
@@ -462,10 +464,10 @@ export function ManageBoard() {
               ? `${result.succeeded.length}건 완료, ${result.failed.length}건 실패`
               : `${result.succeeded.length}건 상태 변경 완료`
           addToast(msg, () => {
-            // undo: 직전 캐시로 롤백 (서버 재전송 없이 낙관적 복원)
+            // undo: 직전 캐시 스냅샷으로 즉시 복원
             if (result.previous) {
-              // 서버 재전송은 없고 UI만 복원되므로 토스트로 안내
-              addToast('되돌리기는 새로고침 후 원래 상태가 됩니다.')
+              queryClient.setQueryData(['requests', 'view'], result.previous)
+              addToast('상태 변경을 되돌렸습니다.')
             }
           })
           clearSelection()
@@ -476,14 +478,15 @@ export function ManageBoard() {
         },
       },
     )
-    void previousRows
   }
 
   function applyBulkAssignee() {
     if (selectedIds.size === 0) return
     const ids = [...selectedIds].filter((id): id is number => id != null)
+    // '__unassigned__' 은 미배정 선택을 의미 → assignee_id: null
+    const assignee_id = bulkAssignee === '__unassigned__' ? null : bulkAssignee || null
     bulkUpdate.mutate(
-      { ids, patch: { assignee_id: bulkAssignee || null } },
+      { ids, patch: { assignee_id } },
       {
         onSuccess: (result) => {
           addToast(`${result.succeeded.length}건 담당자 변경 완료`)
@@ -809,7 +812,7 @@ export function ManageBoard() {
             onChange={(e) => setBulkAssignee(e.target.value)}
           >
             <option value="">담당자 일괄 변경…</option>
-            <option value="">미배정</option>
+            <option value="__unassigned__">미배정</option>
             {assigneeOptions.map((p) => (
               <option key={p.id} value={p.id}>{p.name ?? p.email}</option>
             ))}
@@ -1012,14 +1015,35 @@ export function ManageBoard() {
                         aria-label="상태 변경"
                         className={miniSelectCls}
                         value={r.status ?? ''}
-                        onChange={(e) =>
-                          r.id != null &&
-                          changeStatus.mutate({ id: r.id, status: e.target.value as RequestStatus })
-                        }
+                        onChange={(e) => {
+                          if (r.id == null) return
+                          const toStatus = e.target.value as RequestStatus
+                          const fromStatus = r.status as RequestStatus | undefined
+                          if (fromStatus && toStatus !== fromStatus) {
+                            const allowed = ALLOWED_TRANSITIONS[fromStatus] ?? []
+                            if (!allowed.includes(toStatus)) {
+                              addToast(`${fromStatus} → ${toStatus} 전이는 허용되지 않습니다.`)
+                              return
+                            }
+                          }
+                          changeStatus.mutate({ id: r.id, status: toStatus })
+                        }}
                       >
-                        {STATUS_OPTIONS.map((s) => (
-                          <option key={s} value={s}>{s}</option>
-                        ))}
+                        {STATUS_OPTIONS.map((s) => {
+                          const fromStatus = r.status as RequestStatus | undefined
+                          const allowed = fromStatus
+                            ? (ALLOWED_TRANSITIONS[fromStatus] ?? [])
+                            : []
+                          const isDisallowed =
+                            fromStatus != null &&
+                            s !== fromStatus &&
+                            !allowed.includes(s as RequestStatus)
+                          return (
+                            <option key={s} value={s} disabled={isDisallowed}>
+                              {s}{isDisallowed ? ' (불가)' : ''}
+                            </option>
+                          )
+                        })}
                       </select>
                     </td>
                     <td className="w-32 px-3 py-2">

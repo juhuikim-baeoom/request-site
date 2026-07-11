@@ -183,7 +183,7 @@ export function useChangeStatus() {
         ...(vars.reason != null ? { reason: vars.reason } : {}),
       }),
     onMutate: async (vars) => {
-      await queryClient.cancelQueries({ queryKey: ['requests'] })
+      await queryClient.cancelQueries({ queryKey: ['requests', 'view'] })
       const previous = queryClient.getQueryData<RequestView[]>(['requests', 'view'])
       queryClient.setQueryData<RequestView[]>(['requests', 'view'], (old) =>
         old?.map((r) => (r.id === vars.id ? { ...r, status: vars.status } : r)),
@@ -208,7 +208,7 @@ export function useChangeAssignee() {
     mutationFn: (vars: { id: number; assignee_id: string | null }) =>
       apiSend('PATCH', `/api/requests/${vars.id}`, { assignee_id: vars.assignee_id }),
     onMutate: async (vars) => {
-      await queryClient.cancelQueries({ queryKey: ['requests'] })
+      await queryClient.cancelQueries({ queryKey: ['requests', 'view'] })
       const previous = queryClient.getQueryData<RequestView[]>(['requests', 'view'])
       queryClient.setQueryData<RequestView[]>(['requests', 'view'], (old) =>
         old?.map((r) =>
