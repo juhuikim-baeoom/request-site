@@ -307,6 +307,7 @@ export type Database = {
           desired_due: string | null
           first_completed_at: string | null
           id: number
+          intake_detail: Json | null
           is_locked: boolean
           org: Database['public']['Enums']['request_org']
           parent_request_id: number | null
@@ -325,6 +326,7 @@ export type Database = {
           title: string
           type_code: string
           updated_at: string
+          urgency: Database['public']['Enums']['urgency_level'] | null
           visibility: Database['public']['Enums']['request_visibility']
         }
         Insert: {
@@ -335,6 +337,7 @@ export type Database = {
           desired_due?: string | null
           first_completed_at?: string | null
           id?: never
+          intake_detail?: Json | null
           is_locked?: boolean
           org: Database['public']['Enums']['request_org']
           parent_request_id?: number | null
@@ -353,6 +356,7 @@ export type Database = {
           title: string
           type_code: string
           updated_at?: string
+          urgency?: Database['public']['Enums']['urgency_level'] | null
           visibility?: Database['public']['Enums']['request_visibility']
         }
         Update: {
@@ -363,6 +367,7 @@ export type Database = {
           desired_due?: string | null
           first_completed_at?: string | null
           id?: never
+          intake_detail?: Json | null
           is_locked?: boolean
           org?: Database['public']['Enums']['request_org']
           parent_request_id?: number | null
@@ -381,6 +386,7 @@ export type Database = {
           title?: string
           type_code?: string
           updated_at?: string
+          urgency?: Database['public']['Enums']['urgency_level'] | null
           visibility?: Database['public']['Enums']['request_visibility']
         }
         Relationships: [
@@ -528,6 +534,7 @@ export type Database = {
         | '이관'
         | '철회'
       request_visibility: 'private' | 'dept' | 'function' | 'org' | 'shared'
+      urgency_level: '높음' | '보통' | '낮음'
       user_role: 'staff' | 'system' | 'viewer'
     }
     CompositeTypes: {

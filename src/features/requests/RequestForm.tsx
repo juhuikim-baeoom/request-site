@@ -86,11 +86,12 @@ export function RequestForm() {
 
   function setIntakeField(key: string, value: string) {
     setIntakeValues((prev) => ({ ...prev, [key]: value }))
-    // 값 입력 시 해당 필드 오류 제거
-    if (fieldErrors[key]) {
+    // 값 입력 시 해당 필드 오류 제거 — 오류 키는 'intake_' + key 형태
+    const errorKey = `intake_${key}`
+    if (fieldErrors[errorKey]) {
       setFieldErrors((prev) => {
         const next = { ...prev }
-        delete next[key]
+        delete next[errorKey]
         return next
       })
     }
@@ -112,7 +113,11 @@ export function RequestForm() {
     if (!myOrg) errors['org'] = '소속기관 정보가 없습니다. 시스템팀에 문의하세요.'
     if (!typeCode) errors['type_code'] = '유형을 선택해주세요.'
     if (!title.trim()) errors['title'] = '제목을 입력해주세요.'
-    if (!desiredDue) errors['desired_due'] = '희망완료일을 선택해주세요.'
+    if (!desiredDue) {
+      errors['desired_due'] = '희망완료일을 선택해주세요.'
+    } else if (desiredDue < new Date().toISOString().slice(0, 10)) {
+      errors['desired_due'] = '희망완료일은 오늘 이후여야 합니다.'
+    }
     if (!urgency) errors['urgency'] = '긴급도를 선택해주세요.'
     if (!visibility) errors['visibility'] = '공개범위를 선택해주세요.'
 
@@ -237,10 +242,11 @@ export function RequestForm() {
       <form onSubmit={handleSubmit} className="mt-6 space-y-5">
         {/* 유형 (타입 우선) */}
         <div>
-          <label className={labelCls}>
+          <label htmlFor="field-type_code" className={labelCls}>
             유형 <span className="text-red-500">*</span>
           </label>
           <select
+            id="field-type_code"
             className={`${fieldCls} ${fieldErrors['type_code'] ? 'border-red-400' : ''}`}
             value={typeCode}
             onChange={(e) => handleTypeChange(e.target.value as RequestTypeCode | '')}
@@ -264,10 +270,11 @@ export function RequestForm() {
             <p className="text-xs font-semibold text-blue-700">유형별 필수 정보</p>
             {activeIntakeFields.map((field) => (
               <div key={field.key}>
-                <label className={`${labelCls} text-blue-900`}>
+                <label htmlFor={`field-intake_${field.key}`} className={`${labelCls} text-blue-900`}>
                   {field.label} <span className="text-red-500">*</span>
                 </label>
                 <input
+                  id={`field-intake_${field.key}`}
                   type="text"
                   className={`${fieldCls} ${fieldErrors[`intake_${field.key}`] ? 'border-red-400' : 'border-blue-200 focus:border-brand'}`}
                   value={intakeValues[field.key] ?? ''}
@@ -284,10 +291,11 @@ export function RequestForm() {
 
         {/* 제목 */}
         <div>
-          <label className={labelCls}>
+          <label htmlFor="field-title" className={labelCls}>
             제목 <span className="text-red-500">*</span>
           </label>
           <input
+            id="field-title"
             type="text"
             className={`${fieldCls} ${fieldErrors['title'] ? 'border-red-400' : ''}`}
             value={title}
@@ -303,8 +311,9 @@ export function RequestForm() {
 
         {/* 상세내용 */}
         <div>
-          <label className={labelCls}>상세내용</label>
+          <label htmlFor="field-body" className={labelCls}>상세내용</label>
           <textarea
+            id="field-body"
             className={`${fieldCls} min-h-[140px] resize-y`}
             value={body}
             onChange={(e) => setBody(e.target.value)}
@@ -315,10 +324,11 @@ export function RequestForm() {
         {/* 긴급도 · 희망완료일 */}
         <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
           <div>
-            <label className={labelCls}>
+            <label htmlFor="field-urgency" className={labelCls}>
               긴급도 <span className="text-red-500">*</span>
             </label>
             <select
+              id="field-urgency"
               className={`${fieldCls} ${fieldErrors['urgency'] ? 'border-red-400' : ''}`}
               value={urgency}
               onChange={(e) => {
@@ -335,11 +345,13 @@ export function RequestForm() {
             {fieldErrors['urgency'] && <p className={errorCls}>{fieldErrors['urgency']}</p>}
           </div>
           <div>
-            <label className={labelCls}>
+            <label htmlFor="field-desired_due" className={labelCls}>
               희망완료일 <span className="text-red-500">*</span>
             </label>
             <input
+              id="field-desired_due"
               type="date"
+              min={new Date().toISOString().slice(0, 10)}
               className={`${fieldCls} ${fieldErrors['desired_due'] ? 'border-red-400' : ''}`}
               value={desiredDue}
               onChange={(e) => {
@@ -355,10 +367,11 @@ export function RequestForm() {
 
         {/* 공개범위 */}
         <div>
-          <label className={labelCls}>
+          <label htmlFor="field-visibility" className={labelCls}>
             공개범위 <span className="text-red-500">*</span>
           </label>
           <select
+            id="field-visibility"
             className={`${fieldCls} sm:w-72 ${fieldErrors['visibility'] ? 'border-red-400' : ''}`}
             value={visibility}
             onChange={(e) => {
@@ -436,8 +449,9 @@ export function RequestForm() {
 
         {/* 첨부파일 */}
         <div>
-          <label className={labelCls}>첨부파일</label>
+          <label htmlFor="field-files" className={labelCls}>첨부파일</label>
           <input
+            id="field-files"
             type="file"
             multiple
             className="mt-1 block w-full text-sm text-gray-600 file:mr-3 file:rounded-md file:border-0 file:bg-gray-100 file:px-3 file:py-2 file:text-sm file:font-medium file:text-gray-700 hover:file:bg-gray-200"

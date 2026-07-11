@@ -16,6 +16,7 @@ import type {
   DeptOption,
   SharedTargetType,
 } from '../../types/database'
+import type { Urgency } from '../../lib/constants'
 
 /** 내가 볼 수 있는 요청 목록 (공개범위 적용). 최신순 */
 export function useRequestViews() {
@@ -204,8 +205,7 @@ export interface SharedTargetInput {
 }
 
 export type { RequestPriority } // re-export so other screens keep working
-
-export type Urgency = '높음' | '보통' | '낮음'
+export type { Urgency } // re-export so other screens keep working; source of truth: constants.ts
 
 export interface CreateRequestInput {
   org: RequestOrg
