@@ -24,10 +24,19 @@ create table profiles (
   created_at timestamptz not null default now()
 );
 
--- 가입 시 profiles 자동 생성 (도메인 제한은 Auth 설정/트리거에서)
+-- 가입 시 profiles 자동 생성 + 허용 도메인 제한
+-- @baeoom.com / @baeron.com 이 아니면 예외 발생 → auth.users insert 롤백(가입 차단)
+-- (Google OAuth를 External로 설정해 Workspace Internal 제한을 못 쓰므로 DB에서 강제)
 create function handle_new_user() returns trigger
 language plpgsql security definer set search_path = public as $$
+declare
+  email_domain text := lower(split_part(coalesce(new.email, ''), '@', 2));
 begin
+  if email_domain not in ('baeoom.com', 'baeron.com') then
+    raise exception '허용되지 않은 도메인입니다. @baeoom.com 또는 @baeron.com 계정만 이용할 수 있습니다.'
+      using errcode = 'P0001', hint = 'DOMAIN_NOT_ALLOWED';
+  end if;
+
   insert into profiles (id, email, name)
   values (new.id, new.email, coalesce(new.raw_user_meta_data->>'full_name', new.email))
   on conflict (id) do nothing;
