@@ -10,6 +10,7 @@ import {
   PRIORITY_BADGE,
   dueBadgeClass,
 } from '../../lib/constants'
+import { fmtDateTime } from '../../lib/format'
 import type { RequestOrg, RequestStatus, RequestVisibility } from '../../types/database'
 import { useRequestTypes, useRequestViews, useVisibleSharedTargets } from './api'
 
@@ -187,7 +188,7 @@ export function MyRequests() {
                 </td>
                 <td className="whitespace-nowrap px-3 py-2 text-gray-600">{r.desired_due ?? '-'}</td>
                 <td className="whitespace-nowrap px-3 py-2 text-gray-400">
-                  {r.created_at?.slice(0, 10)}
+                  {fmtDateTime(r.created_at)}
                 </td>
               </tr>
             ))}

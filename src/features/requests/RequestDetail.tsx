@@ -10,6 +10,7 @@ import {
   VISIBILITY_OPTIONS,
   dueBadgeClass,
 } from '../../lib/constants'
+import { fmtDateTime } from '../../lib/format'
 import type { RequestPriority, RequestVisibility } from '../../types/database'
 import {
   getAttachmentUrl,
@@ -24,11 +25,6 @@ import {
 
 const fieldCls =
   'mt-1 block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand'
-
-function fmtDateTime(s: string | null): string {
-  if (!s) return '-'
-  return s.slice(0, 16).replace('T', ' ')
-}
 
 function personLabel(p: { name: string | null; email?: string } | null): string {
   if (!p) return '-'
