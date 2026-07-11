@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useDeferredValue, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Badge } from '../../components/Badge'
 import {
@@ -30,7 +30,7 @@ const miniSelectCls =
 // 기한초과·지연 카드 강조 스타일
 function dueCardClass(due: string | null): string {
   if (due === '기한초과') return 'border-red-300 bg-red-50/70'
-  if (due === '지연') return 'border-amber-300 bg-amber-50/70'
+  if (due === '지연') return 'border-orange-300 bg-orange-50/70'
   return 'border-gray-200 bg-white'
 }
 
@@ -58,8 +58,9 @@ export function ManageBoard() {
     [profiles],
   )
 
+  const deferredQ = useDeferredValue(q)
   const filtered = useMemo(() => {
-    const query = q.trim().toLowerCase()
+    const query = deferredQ.trim().toLowerCase()
     return (rows ?? []).filter((r) => {
       if (org && r.org !== org) return false
       if (typeCode && r.type_code !== typeCode) return false
@@ -77,7 +78,7 @@ export function ManageBoard() {
       }
       return true
     })
-  }, [rows, q, org, typeCode, priority, due, assignee, nameById])
+  }, [rows, deferredQ, org, typeCode, priority, due, assignee, nameById])
 
   const byStatus = useMemo(() => {
     const m = new Map<RequestStatus, typeof filtered>()
@@ -103,6 +104,8 @@ export function ManageBoard() {
     if (!el || e.button !== 0) return
     if ((e.target as HTMLElement).closest('a,button,select,input,textarea')) return
     drag.current = { down: true, sx: e.clientX, sl: el.scrollLeft, moved: false }
+    // 포인터 캡처: 커서가 컨테이너를 벗어나도 드래그 유지
+    try { el.setPointerCapture(e.pointerId) } catch { /* noop */ }
     setDragging(true)
   }
   function onPointerMove(e: React.PointerEvent) {
@@ -125,15 +128,30 @@ export function ManageBoard() {
     }
   }
 
-  const statusSelect = (id: number, current: RequestStatus | null) => (
-    <select className={miniSelectCls} value={current ?? ''} onChange={(e) => changeStatus(id, e.target.value as RequestStatus)}>
-      {STATUS_OPTIONS.map((s) => (
-        <option key={s} value={s}>{s}</option>
-      ))}
-    </select>
-  )
+  const statusSelect = (id: number, current: RequestStatus | null) => {
+    // 현재값이 선택지에 없으면(예: 레거시 '재작업') 비활성 옵션으로 표시해 빈칸·오덮어쓰기 방지
+    const showCurrent = current != null && !STATUS_OPTIONS.includes(current)
+    return (
+      <select
+        aria-label="상태 변경"
+        className={miniSelectCls}
+        value={current ?? ''}
+        onChange={(e) => changeStatus(id, e.target.value as RequestStatus)}
+      >
+        {showCurrent && <option value={current!} disabled>{current} (미사용)</option>}
+        {STATUS_OPTIONS.map((s) => (
+          <option key={s} value={s}>{s}</option>
+        ))}
+      </select>
+    )
+  }
   const assigneeSelect = (id: number, current: string | null) => (
-    <select className={miniSelectCls} value={current ?? ''} onChange={(e) => changeAssignee(id, e.target.value)}>
+    <select
+      aria-label="담당자 배정"
+      className={miniSelectCls}
+      value={current ?? ''}
+      onChange={(e) => changeAssignee(id, e.target.value)}
+    >
       <option value="">미배정</option>
       {assigneeOptions.map((p) => (
         <option key={p.id} value={p.id}>{p.name ?? p.email}</option>
@@ -156,7 +174,9 @@ export function ManageBoard() {
             className="w-full border-0 bg-transparent text-sm outline-none placeholder:text-gray-400"
             aria-label="전체 검색"
           />
-          {q && <span className="whitespace-nowrap text-xs text-gray-400 tabular-nums">{filtered.length}건</span>}
+          <span aria-live="polite" className="whitespace-nowrap text-xs text-gray-400 tabular-nums">
+            {(q || org || typeCode || priority || due || assignee) ? `${filtered.length}건` : ''}
+          </span>
         </div>
         <div className="flex gap-1">
           {(['board', 'list'] as ViewMode[]).map((v) => (
@@ -173,23 +193,23 @@ export function ManageBoard() {
 
       {/* 필터 */}
       <div className="flex flex-wrap items-center gap-2">
-        <select className={selectCls} value={org} onChange={(e) => setOrg(e.target.value as RequestOrg | '')}>
+        <select aria-label="기관 필터" className={selectCls} value={org} onChange={(e) => setOrg(e.target.value as RequestOrg | '')}>
           <option value="">기관 전체</option>
           {ORG_OPTIONS.map((o) => <option key={o} value={o}>{o}</option>)}
         </select>
-        <select className={selectCls} value={typeCode} onChange={(e) => setTypeCode(e.target.value)}>
+        <select aria-label="유형 필터" className={selectCls} value={typeCode} onChange={(e) => setTypeCode(e.target.value)}>
           <option value="">유형 전체</option>
           {types?.map((t) => <option key={t.code} value={t.code}>{t.label}</option>)}
         </select>
-        <select className={selectCls} value={priority} onChange={(e) => setPriority(e.target.value as RequestPriority | '')}>
+        <select aria-label="우선순위 필터" className={selectCls} value={priority} onChange={(e) => setPriority(e.target.value as RequestPriority | '')}>
           <option value="">우선순위 전체</option>
           {PRIORITY_OPTIONS.map((p) => <option key={p} value={p}>{p}</option>)}
         </select>
-        <select className={selectCls} value={due} onChange={(e) => setDue(e.target.value)}>
+        <select aria-label="기한 필터" className={selectCls} value={due} onChange={(e) => setDue(e.target.value)}>
           <option value="">기한 전체</option>
           {DUE_FILTERS.map((d) => <option key={d} value={d}>{d}</option>)}
         </select>
-        <select className={selectCls} value={assignee} onChange={(e) => setAssignee(e.target.value)}>
+        <select aria-label="담당자 필터" className={selectCls} value={assignee} onChange={(e) => setAssignee(e.target.value)}>
           <option value="">담당 전체</option>
           <option value="unassigned">미배정만</option>
           {assigneeOptions.map((p) => <option key={p.id} value={p.id}>{p.name ?? p.email}</option>)}
@@ -205,7 +225,6 @@ export function ManageBoard() {
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={endDrag}
-          onPointerLeave={endDrag}
           onPointerCancel={endDrag}
           onClickCapture={onClickCapture}
           className={`animate-view-enter flex gap-3 overflow-x-auto pb-4 ${dragging ? 'cursor-grabbing select-none' : 'cursor-grab'}`}
@@ -221,7 +240,7 @@ export function ManageBoard() {
                   </span>
                 </div>
                 <div className="flex min-h-[80px] flex-col gap-2 rounded-xl border border-gray-200 bg-gray-100/70 p-2">
-                  {cards.length === 0 && <p className="py-6 text-center text-xs text-gray-300">없음</p>}
+                  {cards.length === 0 && <p className="py-6 text-center text-xs text-gray-400">없음</p>}
                   {cards.map((r, i) => (
                     <div
                       key={r.id}
@@ -230,7 +249,7 @@ export function ManageBoard() {
                     >
                       {(r.due_status === '기한초과' || r.due_status === '지연') && (
                         <span
-                          className={`absolute left-0 top-2 bottom-2 w-[3px] rounded-r ${r.due_status === '기한초과' ? 'bg-red-500 rail-pulse' : 'bg-amber-500'}`}
+                          className={`absolute left-0 top-2 bottom-2 w-[3px] rounded-r ${r.due_status === '기한초과' ? 'bg-red-500 rail-pulse' : 'bg-orange-500'}`}
                           aria-hidden="true"
                         />
                       )}
@@ -288,7 +307,7 @@ export function ManageBoard() {
               {filtered.map((r) => (
                 <tr
                   key={r.id}
-                  className={`border-b border-gray-100 last:border-0 hover:bg-gray-50 ${r.due_status === '기한초과' ? 'bg-red-50/50' : r.due_status === '지연' ? 'bg-amber-50/40' : ''}`}
+                  className={`border-b border-gray-100 last:border-0 hover:bg-gray-50 ${r.due_status === '기한초과' ? 'bg-red-50/50' : r.due_status === '지연' ? 'bg-orange-50/40' : ''}`}
                 >
                   <td className="whitespace-nowrap px-3 py-2 font-mono text-xs text-gray-500">{r.seq}</td>
                   <td className="px-3 py-2">

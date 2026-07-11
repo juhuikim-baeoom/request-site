@@ -55,7 +55,7 @@ export function dueBadgeClass(due: string | null): string {
     case '여유':
       return 'bg-gray-100 text-gray-500'
     case '완료':
-      return 'bg-green-50 text-green-600'
+      return 'bg-green-100 text-green-700'
     default:
       return 'bg-gray-100 text-gray-500'
   }
@@ -65,7 +65,7 @@ export function dueBadgeClass(due: string | null): string {
 export const PRIORITY_BADGE: Record<RequestPriority, string> = {
   긴급: 'bg-red-100 text-red-700',
   보통: 'bg-gray-100 text-gray-600',
-  낮음: 'bg-gray-50 text-gray-400',
+  낮음: 'bg-gray-100 text-gray-500',
 }
 
 // 공개범위 (request_visibility enum, 5단계) — 라벨/설명

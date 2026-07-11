@@ -38,7 +38,7 @@ export function TopNav() {
               key={item.to}
               to={item.to}
               className={({ isActive }) =>
-                `whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                `whitespace-nowrap rounded-md px-3 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 ${
                   isActive
                     ? 'bg-brand text-white'
                     : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
@@ -63,7 +63,7 @@ export function TopNav() {
           )}
           <button
             onClick={() => void signOut()}
-            className="rounded-md border border-gray-300 px-3 py-1.5 text-gray-600 hover:bg-gray-50"
+            className="rounded-md border border-gray-300 px-3 py-1.5 text-gray-600 hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1"
           >
             로그아웃
           </button>
