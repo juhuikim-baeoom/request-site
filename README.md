@@ -85,6 +85,36 @@ npm run test:auth && npm run test:devlogin && npm run test:authz && npm run test
 npm run test:api && npm run test:api-detail && npm run test:api-write && npm run test:api-attach
 ```
 
+### E2E 테스트 (프론트, Playwright)
+
+`@playwright/test` 기반. `playwright.config.ts`의 webServer가 Vite dev(:5173)를 자동 기동한다.
+
+```bash
+npm run test:e2e         # 헤드리스 전체 실행
+npm run test:e2e:ui      # UI 모드(디버깅)
+```
+
+- `tests/e2e/login.spec.ts` — 로그인 렌더링·임시로그인 노출·미인증 리다이렉트 (백엔드 불필요)
+- `tests/e2e/dev-login.spec.ts` — 임시 로그인 → `/requests/new` 진입 흐름. **백엔드(:4000) 미기동 시 자동 skip**
+- 브라우저는 chromium만 설치되어 있다: 재설치는 `npx playwright install chromium`
+
+### DB 직접 접속 (psql)
+
+Docker의 PostgreSQL 16 컨테이너(`request-site-db`)에 로컬 `psql`(Homebrew `libpq`)로 접속한다.
+`libpq`는 keg-only라 PATH 등록이 필요하다: `export PATH="/opt/homebrew/opt/libpq/bin:$PATH"` (`~/.zshrc`).
+
+```bash
+psql "postgresql://request:request@localhost:5432/request_site"
+# 또는
+PGPASSWORD=request psql -h localhost -p 5432 -U request -d request_site
+```
+
+컨테이너 내부 psql로도 접속 가능(클라이언트 설치 불필요):
+
+```bash
+docker exec -it request-site-db psql -U request -d request_site
+```
+
 ## 프로젝트 구조 (백엔드)
 
 ```
