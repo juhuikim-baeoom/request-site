@@ -182,13 +182,19 @@ export async function requestDetailRoutes(app: FastifyInstance) {
 
       const comment = request.body?.comment ?? null
 
-      await withUser(u.id, (tx) =>
-        tx.execute(sql`
+      // AND csat_rating IS NULL: TOCTOU 방지 — 두 요청이 동시에 null 체크를 통과해도
+      // 먼저 커밋한 쪽만 1행을 갱신하고, 나중 요청은 0행 → 409 반환
+      const upd = await withUser(u.id, (tx) =>
+        tx.execute<{ id: number }>(sql`
           update requests
           set csat_rating = ${rating}, csat_comment = ${comment}
-          where id = ${id}
+          where id = ${id} and csat_rating is null
+          returning id
         `),
       )
+      if (upd.rows.length === 0) {
+        reply.code(409).send({ error: 'csat_already_submitted' }); return
+      }
       reply.code(200); return { ok: true }
     },
   )

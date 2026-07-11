@@ -66,18 +66,34 @@ export async function assignRequest({
       resolutionDueAt = addBusinessMinutes(createdAt, policy.resolution_minutes, holidaySet)
     }
 
+    // response_due_at 조회 (배정 시점 기준 응답 기한)
+    const responsePolicyRes = await tx.execute<{ response_minutes: number | null }>(
+      sql`select response_minutes from sla_policy where priority_level = ${priorityLevel}`,
+    )
+    const responseMins = responsePolicyRes.rows[0]?.response_minutes ?? null
+    let responseDueAt: Date | null = null
+    if (responseMins != null) {
+      const createdAt = new Date(row.created_at)
+      responseDueAt = addBusinessMinutes(createdAt, responseMins, holidaySet)
+    }
+
+    // sla_response_breached: 배정이 응답 기한을 초과한 경우 true
+    const responseBreached = responseDueAt != null && new Date() > responseDueAt
+
     // AND status = '접수' 로 낙관적 잠금: 동시 업데이트가 이미 상태를 바꿨다면 0행 리턴
     const upd = await tx.execute<{ id: number }>(sql`
       update requests
       set
-        assignee_id       = ${assigneeId},
-        impact            = ${impact},
-        priority_level    = ${priorityLevel},
-        status            = '진행중',
-        assigned_at       = now(),
-        first_response_at = now(),
-        resolution_due_at = ${resolutionDueAt},
-        sla_policy_id     = ${policy?.id ?? null}
+        assignee_id           = ${assigneeId},
+        impact                = ${impact},
+        priority_level        = ${priorityLevel},
+        status                = '진행중',
+        assigned_at           = now(),
+        first_response_at     = now(),
+        response_due_at       = ${responseDueAt},
+        resolution_due_at     = ${resolutionDueAt},
+        sla_policy_id         = ${policy?.id ?? null},
+        sla_response_breached = ${responseBreached}
       where id = ${reqId} and status = '접수'
       returning id
     `)

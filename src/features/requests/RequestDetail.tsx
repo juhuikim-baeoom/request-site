@@ -260,9 +260,9 @@ export function RequestDetail() {
   if (attachments) {
     for (const a of attachments) {
       if (a.comment_id == null) {
-        // 다운로드 허용 여부: 시스템팀·viewer 이상, 또는 업로더 본인
-        // (서버 /api/attachments/:id/download 와 동일 정책)
-        const canDownload = isSystemUser || a.uploaded_by === profile?.id
+        // 다운로드 허용 여부: 해당 요청 상세를 열람할 수 있으면 첨부도 다운로드 가능
+        // (서버 /api/attachments/:id/download 도 canSeeRequest 통과 시 허용)
+        const canDownload = true
         timeline.push({
           kind: 'attachment',
           id: a.id,

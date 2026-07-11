@@ -43,10 +43,11 @@ assert.equal(list.statusCode, 200)
 assert.equal(list.json().length, 1)
 console.log('staff sees attachment metadata ok')
 
-// 그러나 실제 '다운로드'는 불가 (업로더도 시스템/열람자도 아님) → 404
+// staff는 요청을 열람할 수 있으므로 (visibility=shared) 첨부 다운로드도 가능 → 200
+// (수정 이전: 404. 수정 후: 시스템팀이 올린 산출물도 요청자/staff가 다운로드 가능)
 const staffDl = await app.inject({ method: 'GET', url: `/api/attachments/${attId}/download`, cookies: { sid: staffSid } })
-assert.equal(staffDl.statusCode, 404, 'staff가 타인 첨부를 다운로드하면 안 됨')
-console.log('staff download blocked (404) ok')
+assert.equal(staffDl.statusCode, 200, 'staff가 열람 가능한 요청의 첨부를 다운로드할 수 있어야 함')
+console.log('staff download allowed (canSeeRequest=true) ok')
 
 // 김주희(system)는 다운로드 가능
 const sysDl = await app.inject({ method: 'GET', url: `/api/attachments/${attId}/download`, cookies: { sid: sysSid } })

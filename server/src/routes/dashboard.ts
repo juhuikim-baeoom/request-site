@@ -43,7 +43,7 @@ export async function dashboardRoutes(app: FastifyInstance) {
           )::text as open,
           count(*) filter (
             where r.status not in ('완료','반려','철회')
-              and r.due_status in ('초과','임박')
+              and r.due_status in ('기한초과','임박')
           )::text as overdue_imminent,
           count(*) filter (
             where r.status not in ('완료','반려','철회')

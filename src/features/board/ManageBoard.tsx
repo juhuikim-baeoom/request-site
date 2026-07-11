@@ -37,7 +37,7 @@ import { useAuth } from '../../auth/useAuth'
 type ViewMode = 'board' | 'list'
 
 // ---- 상수 ----
-const DUE_FILTERS = ['기한초과', '지연', '임박', '여유'] as const
+const DUE_FILTERS = ['기한초과', '임박', '여유'] as const
 const IMPACT_OPTIONS: ImpactLevel[] = ['높음', '보통', '낮음']
 const IMPACT_PRIORITY_PREVIEW: Record<ImpactLevel, string> = {
   높음: 'P1',
@@ -57,7 +57,6 @@ const miniSelectCls =
 
 function dueCardClass(due: string | null): string {
   if (due === '기한초과') return 'border-red-300 bg-red-50/70'
-  if (due === '지연') return 'border-orange-300 bg-orange-50/70'
   return 'border-gray-200 bg-white'
 }
 
@@ -519,11 +518,9 @@ export function ManageBoard() {
           ${dragId === r.id ? 'opacity-40' : ''}
         `}
       >
-        {(r.due_status === '기한초과' || r.due_status === '지연') && (
+        {r.due_status === '기한초과' && (
           <span
-            className={`absolute bottom-2 left-0 top-2 w-[3px] rounded-r ${
-              r.due_status === '기한초과' ? 'bg-red-500' : 'bg-orange-500'
-            }`}
+            className="absolute bottom-2 left-0 top-2 w-[3px] rounded-r bg-red-500"
             aria-hidden="true"
           />
         )}
@@ -575,11 +572,9 @@ export function ManageBoard() {
               className={`text-[11px] font-semibold tabular-nums ${
                 r.due_status === '기한초과'
                   ? 'text-red-600'
-                  : r.due_status === '지연'
-                    ? 'text-orange-500'
-                    : r.due_status === '임박'
-                      ? 'text-amber-600'
-                      : 'text-gray-400'
+                  : r.due_status === '임박'
+                    ? 'text-amber-600'
+                    : 'text-gray-400'
               }`}
             >
               {relDue}
@@ -949,9 +944,7 @@ export function ManageBoard() {
                     className={`border-b border-gray-100 last:border-0 hover:bg-gray-50 ${
                       r.due_status === '기한초과'
                         ? 'bg-red-50/50'
-                        : r.due_status === '지연'
-                          ? 'bg-orange-50/40'
-                          : ''
+                        : ''
                     } ${isSelected ? 'bg-brand/5' : ''}`}
                   >
                     <td className="px-3 py-2">
@@ -1000,9 +993,7 @@ export function ManageBoard() {
                             className={`text-[11px] font-semibold tabular-nums ${
                               r.due_status === '기한초과'
                                 ? 'text-red-600'
-                                : r.due_status === '지연'
-                                  ? 'text-orange-500'
-                                  : 'text-gray-400'
+                                : 'text-gray-400'
                             }`}
                           >
                             {relDue}

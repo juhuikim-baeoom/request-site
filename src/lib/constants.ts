@@ -60,13 +60,12 @@ export const ALLOWED_TRANSITIONS: Record<RequestStatus, RequestStatus[]> = {
   철회: [],
 }
 
-// 기한상태(request_view.due_status)별 뱃지 색상 — 초과·지연·임박 강조
+// 기한상태(request_view.due_status)별 뱃지 색상 — 초과·임박 강조
+// DB 생성값: '기한초과'|'임박'|'여유'|RequestStatus(완료/반려/철회)
 export function dueBadgeClass(due: string | null): string {
   switch (due) {
     case '기한초과':
       return 'bg-red-100 text-red-700 font-semibold'
-    case '지연':
-      return 'bg-orange-100 text-orange-700 font-semibold'
     case '임박':
       return 'bg-amber-100 text-amber-800'
     case '여유':

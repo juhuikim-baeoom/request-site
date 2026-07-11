@@ -152,6 +152,7 @@ export type Database = {
           body: string
           created_at: string
           id: number
+          is_internal: boolean
           request_id: number
         }
         Insert: {
@@ -159,6 +160,7 @@ export type Database = {
           body: string
           created_at?: string
           id?: never
+          is_internal?: boolean
           request_id: number
         }
         Update: {
@@ -166,6 +168,7 @@ export type Database = {
           body?: string
           created_at?: string
           id?: never
+          is_internal?: boolean
           request_id?: number
         }
         Relationships: [
@@ -318,8 +321,6 @@ export type Database = {
           is_locked: boolean
           org: Database['public']['Enums']['request_org']
           parent_request_id: number | null
-          /** @deprecated P1 서버는 priority_level 사용. 하위 호환용으로 유지. */
-          priority: Database['public']['Enums']['request_priority']
           priority_level: string | null
           requester_dept: string | null
           requester_email: string | null
@@ -358,7 +359,6 @@ export type Database = {
           is_locked?: boolean
           org: Database['public']['Enums']['request_org']
           parent_request_id?: number | null
-          priority?: Database['public']['Enums']['request_priority']
           priority_level?: string | null
           requester_dept?: string | null
           requester_email?: string | null
@@ -397,7 +397,6 @@ export type Database = {
           is_locked?: boolean
           org?: Database['public']['Enums']['request_org']
           parent_request_id?: number | null
-          priority?: Database['public']['Enums']['request_priority']
           priority_level?: string | null
           requester_dept?: string | null
           requester_email?: string | null
@@ -467,31 +466,37 @@ export type Database = {
           body: string | null
           completed_at: string | null
           created_at: string | null
+          csat_comment: string | null
+          csat_rating: number | null
           desired_due: string | null
           due_status: string | null
           final_lead_days: number | null
           final_resolved_at: string | null
           first_completed_at: string | null
           first_lead_days: number | null
+          first_response_at: string | null
           first_resolved_at: string | null
+          hold_reason: string | null
           id: number | null
           impact: Database['public']['Enums']['urgency_level'] | null
           intake_detail: Json | null
           is_locked: boolean | null
           org: Database['public']['Enums']['request_org'] | null
           parent_request_id: number | null
-          /** @deprecated P1 서버는 priority_level 사용. 하위 호환용으로 유지. */
-          priority: Database['public']['Enums']['request_priority'] | null
           priority_level: string | null
+          reject_reason: string | null
           requester_dept: string | null
           requester_email: string | null
+          requester_function: string | null
           requester_id: string | null
           requester_name: string | null
           requester_org: Database['public']['Enums']['request_org'] | null
           resolution_due_at: string | null
           response_due_at: string | null
           rework_count: number | null
+          rework_reason: string | null
           seq: string | null
+          sla_policy_id: number | null
           sla_resolution_breached: boolean | null
           sla_response_breached: boolean | null
           source: Database['public']['Enums']['request_source'] | null

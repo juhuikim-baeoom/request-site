@@ -55,11 +55,8 @@ export interface PersonRef {
   org_affil: RequestOrg | null
 }
 
-/** request_view + csat 필드 (서버가 select * from request_view 반환) */
-export interface RequestViewWithCsat extends RequestView {
-  csat_rating?: number | null
-  csat_comment?: string | null
-}
+/** request_view (csat 필드 포함 — RequestView 타입이 이미 포함하므로 별칭 유지) */
+export type RequestViewWithCsat = RequestView
 
 export interface RequestDetailData {
   view: RequestViewWithCsat
@@ -78,7 +75,6 @@ export function useRequestDetail(id: number) {
 
 export interface CommentWithAuthor extends RequestComment {
   author: { name: string | null } | null
-  is_internal?: boolean
 }
 
 export function useRequestComments(id: number) {
@@ -362,22 +358,6 @@ export function useBulkUpdate() {
   })
 }
 
-/**
- * @deprecated useChangeStatus / useChangeAssignee 로 분리됨. 하위 호환용으로 유지.
- * ManageBoard 등 기존 호출부가 컴파일 유지되도록 남김.
- */
-export function useBoardUpdate() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: (vars: {
-      id: number
-      patch: { status?: RequestStatus; assignee_id?: string | null }
-    }) => apiSend('PATCH', `/api/requests/${vars.id}`, vars.patch),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['requests'] })
-    },
-  })
-}
 
 /** 요청 유형 목록 (활성 유형만, 정렬순) */
 export function useRequestTypes() {

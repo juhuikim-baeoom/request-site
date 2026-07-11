@@ -56,9 +56,8 @@ function loadSavedView(): SavedView {
 // 기한 우선 정렬 순위 (작을수록 위)
 const DUE_RANK: Record<string, number> = {
   기한초과: 0,
-  지연: 1,
-  임박: 2,
-  여유: 3,
+  임박: 1,
+  여유: 2,
 }
 function dueRank(due: string | null): number {
   return due != null && due in DUE_RANK ? DUE_RANK[due] : 9
@@ -83,8 +82,6 @@ function fmtRelativeDue(dueDateStr: string | null): string {
 function dueIcon(due: string | null): string {
   switch (due) {
     case '기한초과':
-      return '!'
-    case '지연':
       return '!'
     case '임박':
       return '~'
