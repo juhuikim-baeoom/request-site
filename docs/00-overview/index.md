@@ -17,20 +17,23 @@ ssot_for: 주제 → 문서 매핑 (문서 전체의 진입점)
 
 | 항목 | 값 |
 |------|-----|
-| 프론트엔드 | React 18 · Vite 5 · TypeScript · Tailwind · React Router · TanStack Query |
-| 백엔드 | Supabase (PostgreSQL · Auth · Storage · RLS) |
-| 배포 | Vercel |
-| 인증 | Supabase Auth · Google OAuth · `@baeoom.com`/`@baeron.com` 도메인 제한 |
+| 프론트엔드 | React 18 · Vite 5 · TypeScript · Tailwind · React Router · TanStack Query · REST 클라이언트 |
+| 백엔드 | Fastify 4 REST API + Drizzle ORM (`server/`) |
+| DB | 자체호스팅 PostgreSQL 16 (Docker) |
+| 인증 | 세션 쿠키(서버측 저장소) · Google OAuth · dev-login(로컬) · `@baeoom.com`/`@baeron.com` 도메인 제한 |
+| 권한 | 앱 계층 authz (`server/src/authz.ts`) |
+| 스토리지 | 로컬 디스크 (`server/uploads/`) |
 | 역할 | staff(일반직원) / system(시스템팀) / viewer(열람) |
+
+> Supabase에서 자체호스팅 PostgreSQL + Fastify/Drizzle 스택으로 이전 완료. 상세: `docs/superpowers/specs/2026-07-11-supabase-to-postgres-migration-design.md`.
 
 ```mermaid
 graph LR
-    U["직원 브라우저"] --> FE["React SPA (Vercel)"]
-    FE --> SB["Supabase"]
-    SB --> DB["PostgreSQL + RLS"]
-    SB --> AU["Auth (Google OAuth)"]
-    SB --> ST["Storage (첨부)"]
-    GAS["Gmail 접수 (GAS, 전환기)"] -->|service_role| DB
+    U["직원 브라우저"] --> FE["React SPA (Vite)"]
+    FE -->|REST /api| API["Fastify + Drizzle (server/)"]
+    API --> DB["PostgreSQL 16 (Docker)"]
+    API --> ST["로컬 디스크 (uploads/)"]
+    API --> AU["세션쿠키 · Google OAuth"]
 ```
 
 ## 주제 → SSOT 문서 매핑
@@ -38,15 +41,14 @@ graph LR
 | 주제 | SSOT 문서 |
 |------|-----------|
 | 프로젝트 규칙 · 표준 요약 · 영향 매핑 | `CLAUDE.md` (저장소 루트) |
-| DB 스키마 · RLS · 트리거 · 뷰 | `docs/reference/db-schema.md` (원천: `schema.sql`) |
+| DB 스키마 (정본) | `server/src/db/schema.ts` (Drizzle) + `server/drizzle/*.sql` |
+| REST API 계약 · 백엔드 구조 | `server/src/routes/*.ts`, `server/src/authz.ts` |
+| 인프라 이전 설계 | `docs/superpowers/specs/2026-07-11-supabase-to-postgres-migration-design.md` |
+| 프로세스·프론트 재정비 (통합 설계) | `docs/superpowers/specs/2026-07-11-redesign-on-postgres-stack.md` |
 | 화면별 기능 요구사항 · 역할별 권한 | `docs/reference/requirements.md` |
-| DB 네이밍 표준 (약어·예약어·접미사) | `docs/standards/01-database-naming-rules.md` |
-| 테이블·컬럼 설계 표준 (접두사·감사컬럼·PK) | `docs/standards/02-table-column-standards.md` |
-| 데이터 관리 (마이그레이션·시드·시크릿) | `docs/standards/03-data-management-rules.md` |
-| 문서 관리 규칙 (docs-as-code·Diátaxis) | `docs/standards/04-document-management-rules.md` |
+| DB 네이밍/설계/데이터/문서 표준 | `docs/standards/01`~`04` |
 | 아키텍처 결정 기록 | `docs/adr/` |
 | 릴리스 변경 이력 | `CHANGELOG.md` (저장소 루트) |
-| DB 마이그레이션 (forward-only) | `supabase/migrations/README.md` |
 
 ## 문서 디렉토리 구조 (Diátaxis 기반)
 
