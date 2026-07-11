@@ -5,6 +5,24 @@
 ## [Unreleased]
 
 ### Added
+- **P7 계정 관리 UI** (`src/features/accounts/Accounts.tsx`, `src/features/accounts/api.ts`)
+  - `useUsers` 훅: `GET /api/users` 호출, 30s staleTime.
+  - `useUpdateUser(userId)` 훅: `PATCH /api/users/:id` — role/dept/org_affil/dept_function 부분 수정.
+  - `useImportOrgDirectory` 훅: `POST /api/org-directory/import {rows}` — org_directory 대량 upsert.
+  - 사용자 목록 표: 이름·이메일·부서·소속기관·직무·역할. 행별 인라인 수정(수정 버튼 → 편집 행 전환 → 저장/취소).
+  - CSV 업로드 패널: 파일 선택 → 클라이언트 파싱(헤더 email,name,dept,org_affil,dept_function,role) → 미리보기 행수 표시 → 가져오기 → 결과(upserted/skipped/errors) 표시.
+  - 안내문: 부서·기관 변경은 신규 요청부터 반영(과거 스냅샷 유지) amber 배너.
+  - 접근성: 역할 뱃지 색+텍스트 병용, 모든 버튼 `aria-label`, 표 `scope`, `role="alert"` 오류, `role="status"` 결과.
+
+- **P8 인앱 알림 벨** (`src/components/NotificationBell.tsx`, `src/features/notifications/api.ts`)
+  - `useNotifications` 훅: `GET /api/notifications` 30초 refetchInterval, 15s staleTime.
+  - `useMarkRead` 훅: `POST /api/notifications/:id/read` 단건 읽음.
+  - `useMarkAllRead` 훅: `POST /api/notifications/read-all` 전체 읽음.
+  - `NotificationBell` 컴포넌트: TopNav 우측 배치(전 역할 노출). 미읽음 수 빨간 뱃지(색+숫자). 드롭다운 최근 50개 목록(메시지·시각), 미읽음 파란 점 구분, 항목 클릭 → 해당 요청 상세 이동 + 읽음 처리, '모두 읽음' 버튼.
+  - Escape 키 / 외부 클릭으로 드롭다운 닫기, 포커스 복귀.
+  - 접근성: `aria-label`(미읽음 수 텍스트 포함), `aria-haspopup`, `aria-expanded`, 패널 `role="dialog"`, `aria-live` 폴링 결과.
+
+### Added
 - **P6 대시보드 UI** (`src/features/dashboard/Dashboard.tsx`, `src/features/dashboard/api.ts`)
   - `useDashboardMetrics(from?, to?)` 훅: `GET /api/dashboard/metrics` 호출, React Query 60s staleTime.
   - 기간 필터: 연도 선택 / 월 선택 / 사용자지정(from-to) 3모드, URL 쿼리파라미터 전달.

@@ -1,6 +1,7 @@
 import { NavLink } from 'react-router-dom'
 import { useAuth } from '../auth/useAuth'
 import type { UserRole } from '../types/database'
+import { NotificationBell } from './NotificationBell'
 
 interface NavItem {
   to: string
@@ -61,6 +62,7 @@ export function TopNav() {
               )}
             </span>
           )}
+          <NotificationBell />
           <button
             onClick={() => void signOut()}
             className="rounded-md border border-gray-300 px-3 py-1.5 text-gray-600 hover:bg-gray-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1"
