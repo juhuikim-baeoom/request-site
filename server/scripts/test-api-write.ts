@@ -41,6 +41,14 @@ const edit = await app.inject({ method: 'PATCH', url: `/api/requests/${reqId}`, 
 assert.equal(edit.statusCode, 200)
 console.log('edit ok')
 
+// status 변경 + 필드 편집 동시 → 400 (stale-status bypass 방지)
+const combined = await app.inject({
+  method: 'PATCH', url: `/api/requests/${reqId}`, cookies,
+  payload: { status: '보류', title: '악의적편집' },
+})
+assert.equal(combined.statusCode, 400, `status+field 동시 → 400, got ${combined.statusCode}`)
+console.log('combined status+field → 400 ok')
+
 // 정리
 await db.delete(requests).where(eq(requests.id, reqId))
 await app.close(); await pool.end()

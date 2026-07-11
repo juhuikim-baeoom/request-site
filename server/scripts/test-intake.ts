@@ -109,6 +109,25 @@ const cookies = { sid }
   console.log('(5) intake_detail 없음 → 400 OK')
 }
 
+// ──────────────────────────────────────────
+// (6) intake_detail 필수키에 falsy-but-non-empty 값({}·[]·0·false) → 400
+//     (issue 7 수정 검증)
+// ──────────────────────────────────────────
+{
+  const res = await app.inject({
+    method: 'POST', url: '/api/requests', cookies,
+    payload: {
+      org: '공통', type_code: 'error', title: '오류테스트3',
+      // 모든 값이 string이 아닌 falsy-but-non-empty — 이전에는 통과했으나 지금은 400이어야 함
+      intake_detail: { screen_url: {}, reproduce: [], occurred_at: 0 },
+    },
+  })
+  assert.equal(res.statusCode, 400, `falsy non-string 값 → 400, got ${res.statusCode}: ${res.body}`)
+  const body = res.json()
+  assert.equal(body.error, 'intake_detail_missing')
+  console.log('(6) falsy non-string intake_detail 값 → 400 OK')
+}
+
 await app.close()
 await pool.end()
 console.log('\ntest:intake ALL PASSED')

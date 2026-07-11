@@ -59,7 +59,15 @@ export async function requestRoutes(app: FastifyInstance) {
       const detail: Record<string, unknown> = (typeof b.intake_detail === 'object' && b.intake_detail !== null)
         ? b.intake_detail
         : {}
-      const missing = required.filter((k) => !(k in detail) || detail[k] === undefined || detail[k] === null || detail[k] === '')
+      const missing = required.filter((k) => {
+        if (!(k in detail)) return true
+        const v = detail[k]
+        if (v === undefined || v === null) return true
+        // 타입별 구체적 검증: 문자열은 비어있으면 안 되고, 비문자열(객체·배열·숫자 등)은 허용하지 않음
+        if (typeof v !== 'string') return true
+        if (v.trim() === '') return true
+        return false
+      })
       if (missing.length > 0) {
         reply.code(400)
         return { error: 'intake_detail_missing', missing }
@@ -131,6 +139,12 @@ export async function requestRoutes(app: FastifyInstance) {
 
     // 상태 변경은 changeStatus()를 통해서만
     if (b.status !== undefined) {
+      // status 변경과 내용 편집을 한 번에 허용하지 않아 stale-status 우회 방지 (issues 2, 4, 5, 6)
+      const otherFields = ['title', 'body', 'urgency', 'visibility', 'desired_due', 'assignee_id']
+      if (otherFields.some((k) => b[k] !== undefined)) {
+        reply.code(400); return { error: 'status change and field edit must not be combined in one request' }
+      }
+
       const ownerCancel = isOwner && row.status === '접수' && b.status === '철회'
       if (!sys && !ownerCancel) { reply.code(403); return { error: 'forbidden' } }
 
@@ -144,11 +158,7 @@ export async function requestRoutes(app: FastifyInstance) {
         throw e
       }
 
-      // status 외에 변경할 필드가 없으면 여기서 종료
-      const otherFields = ['title', 'body', 'urgency', 'visibility', 'desired_due', 'assignee_id']
-      if (!otherFields.some((k) => b[k] !== undefined)) {
-        reply.code(200); return { ok: true }
-      }
+      reply.code(200); return { ok: true }
     }
 
     // 보드 변경(assignee) — 시스템팀만
@@ -156,6 +166,7 @@ export async function requestRoutes(app: FastifyInstance) {
     if (wantsBoard && !sys) { reply.code(403); return { error: 'forbidden' } }
 
     // 내용 수정 — 시스템팀 또는 (본인 且 접수)
+    // row.status는 status 변경이 없는 경우에만 이 분기에 도달하므로 stale 문제 없음
     const wantsEdit = ['title', 'body', 'urgency', 'visibility', 'desired_due'].some((k) => b[k] !== undefined)
     if (wantsEdit && !sys && !(isOwner && row.status === '접수')) { reply.code(403); return { error: 'forbidden' } }
 

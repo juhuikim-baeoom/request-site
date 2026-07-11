@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm'
-import { db, withUser } from '../db/client.js'
+import { withUser } from '../db/client.js'
 
 export type RequestStatus = '접수' | '진행중' | '보류' | '완료' | '반려' | '철회'
 
@@ -25,6 +25,9 @@ export class TransitionError extends Error {
  * 요청 상태 전이 서비스.
  * completed_at / first_resolved_at / final_resolved_at / rework_count / sla_resolution_breached 는
  * on_status_change 트리거가 처리하므로 이 서비스에서는 건드리지 않는다.
+ *
+ * TOCTOU 방지: SELECT … FOR UPDATE 와 UPDATE가 같은 트랜잭션 안에서 실행되고,
+ * UPDATE WHERE 절에 AND status = ${from} 을 포함해 동시성 레이스를 막는다.
  */
 export async function changeStatus({
   reqId,
@@ -36,41 +39,52 @@ export async function changeStatus({
   to: RequestStatus
   reason?: string
   actorId: string
-}): Promise<void> {
-  // 현재 status 조회
-  const cur = await db.execute<{ status: RequestStatus }>(
-    sql`select status from requests where id = ${reqId}`,
-  )
-  const row = cur.rows[0]
-  if (!row) {
-    throw new TransitionError('요청을 찾을 수 없습니다', 'NOT_FOUND')
-  }
-  const from = row.status
-
-  // 전이 허용 여부 검증
-  if (!ALLOWED[from]?.includes(to)) {
-    throw new TransitionError(
-      `${from} → ${to} 전이는 허용되지 않습니다`,
-      'ILLEGAL_TRANSITION',
+}): Promise<{ from: RequestStatus }> {
+  return withUser(actorId, async (tx) => {
+    // 같은 트랜잭션 안에서 SELECT … FOR UPDATE로 행 잠금 후 status 읽기
+    const cur = await tx.execute<{ status: RequestStatus }>(
+      sql`select status from requests where id = ${reqId} for update`,
     )
-  }
+    const row = cur.rows[0]
+    if (!row) {
+      throw new TransitionError('요청을 찾을 수 없습니다', 'NOT_FOUND')
+    }
+    const from = row.status
 
-  // reason 컬럼 결정 (대상 상태일 때만 세팅)
-  const sets: ReturnType<typeof sql>[] = [sql`status = ${to}`]
-  if (to === '보류' && reason != null) {
-    sets.push(sql`hold_reason = ${reason}`)
-  } else if (to === '반려' && reason != null) {
-    sets.push(sql`reject_reason = ${reason}`)
-  } else if (to === '진행중' && from === '완료' && reason != null) {
-    // 완료→진행중 재작업 사유
-    sets.push(sql`rework_reason = ${reason}`)
-  }
+    // 전이 허용 여부 검증
+    if (!ALLOWED[from]?.includes(to)) {
+      throw new TransitionError(
+        `${from} → ${to} 전이는 허용되지 않습니다`,
+        'ILLEGAL_TRANSITION',
+      )
+    }
 
-  await withUser(actorId, (tx) =>
-    tx.execute(sql`
+    // reason 컬럼 결정 (대상 상태일 때만 세팅)
+    const sets: ReturnType<typeof sql>[] = [sql`status = ${to}`]
+    if (to === '보류' && reason != null) {
+      sets.push(sql`hold_reason = ${reason}`)
+    } else if (to === '반려' && reason != null) {
+      sets.push(sql`reject_reason = ${reason}`)
+    } else if (to === '진행중' && from === '완료' && reason != null) {
+      // 완료→진행중 재작업 사유
+      sets.push(sql`rework_reason = ${reason}`)
+    }
+
+    // AND status = ${from} 으로 낙관적 잠금: 동시 업데이트가 이미 상태를 바꿨다면 0행 리턴
+    const upd = await tx.execute<{ id: number }>(sql`
       update requests
       set ${sql.join(sets, sql`, `)}
-      where id = ${reqId}
-    `),
-  )
+      where id = ${reqId} and status = ${from}
+      returning id
+    `)
+    if (upd.rows.length === 0) {
+      // 다른 트랜잭션이 이미 상태를 변경했음 — 재시도 필요 시 호출자가 처리
+      throw new TransitionError(
+        `동시 변경으로 인해 전이에 실패했습니다 (${from} → ${to})`,
+        'CONCURRENT_MODIFICATION',
+      )
+    }
+
+    return { from }
+  })
 }
