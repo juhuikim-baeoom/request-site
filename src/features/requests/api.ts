@@ -7,11 +7,46 @@ import type {
   RequestType,
   RequestVisibility,
   RequestRow,
+  RequestView,
+  RequestSharedTarget,
   DeptOption,
   SharedTargetType,
 } from '../../types/database'
 
 const ATTACHMENT_BUCKET = 'request-attachments'
+
+/** 내가 볼 수 있는 요청 목록 (request_view, RLS로 공개범위 적용). 최신순 */
+export function useRequestViews() {
+  return useQuery({
+    queryKey: ['requests', 'view'],
+    queryFn: async (): Promise<RequestView[]> => {
+      const { data, error } = await supabase
+        .from('request_view')
+        .select('*')
+        .order('created_at', { ascending: false })
+      if (error) throw error
+      return data ?? []
+    },
+  })
+}
+
+/** 볼 수 있는 요청들의 추가 공유 대상 (뱃지 표시용). request_id → 목록 */
+export function useVisibleSharedTargets() {
+  return useQuery({
+    queryKey: ['requests', 'shared_targets'],
+    queryFn: async (): Promise<Map<number, RequestSharedTarget[]>> => {
+      const { data, error } = await supabase.from('request_shared_targets').select('*')
+      if (error) throw error
+      const map = new Map<number, RequestSharedTarget[]>()
+      for (const t of data ?? []) {
+        const list = map.get(t.request_id) ?? []
+        list.push(t)
+        map.set(t.request_id, list)
+      }
+      return map
+    },
+  })
+}
 
 /** 요청 유형 목록 (활성 유형만, 정렬순) */
 export function useRequestTypes() {

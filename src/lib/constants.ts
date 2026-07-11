@@ -1,6 +1,7 @@
 import type {
   RequestOrg,
   RequestPriority,
+  RequestStatus,
   RequestVisibility,
   RequestTypeCode,
 } from '../types/database'
@@ -10,6 +11,57 @@ export const ORG_OPTIONS: RequestOrg[] = ['배움', '배론', '허브', '공통'
 
 // 우선순위 (request_priority enum)
 export const PRIORITY_OPTIONS: RequestPriority[] = ['긴급', '보통', '낮음']
+
+// 상태 (request_status enum)
+export const STATUS_OPTIONS: RequestStatus[] = [
+  '접수',
+  '확인',
+  '진행중',
+  '검수대기',
+  '재작업',
+  '완료',
+  '보류',
+  '반려',
+  '이관',
+]
+
+// 상태별 뱃지 색상
+export const STATUS_BADGE: Record<RequestStatus, string> = {
+  접수: 'bg-gray-100 text-gray-700',
+  확인: 'bg-blue-100 text-blue-700',
+  진행중: 'bg-indigo-100 text-indigo-700',
+  검수대기: 'bg-purple-100 text-purple-700',
+  재작업: 'bg-orange-100 text-orange-700',
+  완료: 'bg-green-100 text-green-700',
+  보류: 'bg-yellow-100 text-yellow-800',
+  반려: 'bg-red-100 text-red-700',
+  이관: 'bg-teal-100 text-teal-700',
+}
+
+// 기한상태(request_view.due_status)별 뱃지 색상 — 초과·지연·임박 강조
+export function dueBadgeClass(due: string | null): string {
+  switch (due) {
+    case '기한초과':
+      return 'bg-red-100 text-red-700 font-semibold'
+    case '지연':
+      return 'bg-orange-100 text-orange-700 font-semibold'
+    case '임박':
+      return 'bg-amber-100 text-amber-800'
+    case '여유':
+      return 'bg-gray-100 text-gray-500'
+    case '완료':
+      return 'bg-green-50 text-green-600'
+    default:
+      return 'bg-gray-100 text-gray-500'
+  }
+}
+
+// 우선순위 뱃지 색상
+export const PRIORITY_BADGE: Record<RequestPriority, string> = {
+  긴급: 'bg-red-100 text-red-700',
+  보통: 'bg-gray-100 text-gray-600',
+  낮음: 'bg-gray-50 text-gray-400',
+}
 
 // 공개범위 (request_visibility enum, 5단계) — 라벨/설명
 export const VISIBILITY_OPTIONS: {
