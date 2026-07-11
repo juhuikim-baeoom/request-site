@@ -1,0 +1,2 @@
+CREATE TYPE "public"."notification_type" AS ENUM('assigned', 'status', 'comment');--> statement-breakpoint
+ALTER TABLE "notifications" ALTER COLUMN "type" SET DATA TYPE notification_type USING type::notification_type;

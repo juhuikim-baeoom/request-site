@@ -91,19 +91,20 @@ export async function requestDetailRoutes(app: FastifyInstance) {
       const wantsInternal = request.body?.is_internal === true
       const isInternal = wantsInternal && isSystem(u)
 
-      // 댓글 삽입 전에 요청 메타데이터 조회 (알림 대상 결정용)
-      const reqMeta = await db.execute<{ requester_id: string | null; assignee_id: string | null; seq: string | null }>(
-        sql`select requester_id, assignee_id, seq from requests where id = ${id}`,
-      )
-      const reqRow = reqMeta.rows[0]
-
-      const inserted = await withUser(u.id, (tx) =>
-        tx.execute<any>(sql`
+      // reqMeta 조회를 withUser 트랜잭션 안에서 수행해 TOCTOU 방지
+      // (INSERT 시점의 최신 assignee를 읽음)
+      let reqRow: { requester_id: string | null; assignee_id: string | null; seq: string | null } | undefined
+      const inserted = await withUser(u.id, async (tx) => {
+        const reqMeta = await tx.execute<{ requester_id: string | null; assignee_id: string | null; seq: string | null }>(
+          sql`select requester_id, assignee_id, seq from requests where id = ${id}`,
+        )
+        reqRow = reqMeta.rows[0]
+        return tx.execute<any>(sql`
           insert into request_comments (request_id, author_id, body, is_internal)
           values (${id}, ${u.id}, ${body}, ${isInternal})
           returning id
-        `),
-      )
+        `)
+      })
 
       // 공개 댓글인 경우에만 알림 발송
       if (!isInternal && reqRow) {

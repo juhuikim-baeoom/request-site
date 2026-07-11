@@ -8,30 +8,35 @@ export async function notificationRoutes(app: FastifyInstance) {
   app.addHook('preHandler', authenticate)
 
   // GET /api/notifications — 최근 50개 + unreadCount
+  // 단일 CTE로 items·unreadCount를 원자적으로 조회 (두 쿼리 사이 알림 변경에 의한 불일치 방지)
   app.get('/api/notifications', async (request, _reply) => {
     const u = request.currentUser!
-    const items = await db.execute<{
+    const result = await db.execute<{
       id: number
       type: string
       request_id: number | null
       message: string
       is_read: boolean
       created_at: string
+      unread_count: number
     }>(sql`
-      select id, type, request_id, message, is_read, created_at
-      from notifications
-      where user_id = ${u.id}
-      order by created_at desc
+      with unread_cnt as (
+        select count(*)::int as cnt
+        from notifications
+        where user_id = ${u.id} and is_read = false
+      )
+      select n.id, n.type, n.request_id, n.message, n.is_read, n.created_at,
+             uc.cnt as unread_count
+      from notifications n
+      cross join unread_cnt uc
+      where n.user_id = ${u.id}
+      order by n.created_at desc
       limit 50
     `)
-    const unreadCount = await db.execute<{ count: string }>(sql`
-      select count(*)::int as count
-      from notifications
-      where user_id = ${u.id} and is_read = false
-    `)
+    const rows = result.rows
     return {
-      items: items.rows,
-      unreadCount: Number(unreadCount.rows[0]?.count ?? 0),
+      items: rows.map(({ unread_count: _uc, ...rest }) => rest),
+      unreadCount: Number(rows[0]?.unread_count ?? 0),
     }
   })
 

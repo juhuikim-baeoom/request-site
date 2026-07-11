@@ -15,6 +15,7 @@ export const requestSource = pgEnum('request_source', ['web', 'email'])
 export const requestVisibility = pgEnum('request_visibility', [
   'private', 'dept', 'function', 'org', 'shared',
 ])
+export const notificationType = pgEnum('notification_type', ['assigned', 'status', 'comment'])
 
 // auth.users + profiles 통합
 export const users = pgTable('users', {
@@ -168,7 +169,7 @@ export const requestAttachments = pgTable('request_attachments', {
 export const notifications = pgTable('notifications', {
   id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
   userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-  type: text('type').notNull(),
+  type: notificationType('type').notNull(),
   requestId: bigint('request_id', { mode: 'number' }).references(() => requests.id, { onDelete: 'cascade' }),
   message: text('message').notNull(),
   isRead: boolean('is_read').notNull().default(false),
