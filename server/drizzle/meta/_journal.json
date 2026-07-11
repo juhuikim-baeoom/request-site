@@ -5,29 +5,15 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1783773909256,
-      "tag": "0000_mute_doctor_octopus",
+      "when": 1783779927592,
+      "tag": "0000_powerful_bucky",
       "breakpoints": true
     },
     {
       "idx": 1,
       "version": "7",
-      "when": 1783773916381,
+      "when": 1783779927593,
       "tag": "0001_triggers",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "7",
-      "when": 1783777559188,
-      "tag": "0002_jazzy_grey_gargoyle",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "7",
-      "when": 1783777812307,
-      "tag": "0003_ordinary_red_ghost",
       "breakpoints": true
     }
   ]

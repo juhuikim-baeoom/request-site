@@ -1,15 +1,16 @@
 import {
   pgEnum, pgTable, uuid, text, integer, bigint, boolean, timestamp, date, index, unique,
-  uniqueIndex, type AnyPgColumn,
+  uniqueIndex, smallint, jsonb, type AnyPgColumn,
 } from 'drizzle-orm/pg-core'
 import { sql } from 'drizzle-orm'
 
 export const userRole = pgEnum('user_role', ['staff', 'system', 'viewer'])
 export const requestOrg = pgEnum('request_org', ['배움', '배론', '허브', '공통'])
 export const requestStatus = pgEnum('request_status', [
-  '접수', '확인', '진행중', '검수대기', '재작업', '완료', '보류', '반려', '이관', '철회',
+  '접수', '진행중', '보류', '완료', '반려', '철회',
 ])
-export const requestPriority = pgEnum('request_priority', ['긴급', '보통', '낮음'])
+export const urgencyLevel = pgEnum('urgency_level', ['높음', '보통', '낮음'])
+export const priorityLevel = pgEnum('priority_level', ['P1', 'P2', 'P3', 'P4'])
 export const requestSource = pgEnum('request_source', ['web', 'email'])
 export const requestVisibility = pgEnum('request_visibility', [
   'private', 'dept', 'function', 'org', 'shared',
@@ -56,13 +57,26 @@ export const requestTypes = pgTable('request_types', {
   active: boolean('active').default(true),
 })
 
+// SLA 정책 테이블 — requests 보다 먼저 정의 (FK)
+export const slaPolicy = pgTable('sla_policy', {
+  id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
+  priorityLevel: priorityLevel('priority_level').notNull().unique(),
+  responseMinutes: integer('response_minutes').notNull(),
+  resolutionMinutes: integer('resolution_minutes'),
+})
+
+// 공휴일 테이블
+export const holidays = pgTable('holidays', {
+  holidayOn: date('holiday_on').primaryKey(),
+  label: text('label'),
+})
+
 export const requests = pgTable('requests', {
   id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
   seq: text('seq').unique(),
   source: requestSource('source').notNull().default('web'),
   org: requestOrg('org').notNull(),
   typeCode: text('type_code').notNull().references(() => requestTypes.code),
-  priority: requestPriority('priority').notNull().default('보통'),
   title: text('title').notNull(),
   body: text('body'),
   requesterId: uuid('requester_id').references(() => users.id),
@@ -75,7 +89,6 @@ export const requests = pgTable('requests', {
   requesterOrg: requestOrg('requester_org'),
   requesterFunction: text('requester_function'),
   desiredDue: date('desired_due'),
-  firstCompletedAt: timestamp('first_completed_at', { withTimezone: true }),
   completedAt: timestamp('completed_at', { withTimezone: true }),
   reworkCount: integer('rework_count').notNull().default(0),
   parentRequestId: bigint('parent_request_id', { mode: 'number' })
@@ -84,6 +97,25 @@ export const requests = pgTable('requests', {
   isLocked: boolean('is_locked').notNull().default(false),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  // 신규 컬럼
+  urgency: urgencyLevel('urgency').notNull().default('보통'),
+  impact: urgencyLevel('impact'),
+  priorityLevelCol: priorityLevel('priority_level'),
+  intakeDetail: jsonb('intake_detail').notNull().default(sql`'{}'::jsonb`),
+  csatRating: smallint('csat_rating'),
+  csatComment: text('csat_comment'),
+  holdReason: text('hold_reason'),
+  rejectReason: text('reject_reason'),
+  reworkReason: text('rework_reason'),
+  assignedAt: timestamp('assigned_at', { withTimezone: true }),
+  responseDueAt: timestamp('response_due_at', { withTimezone: true }),
+  resolutionDueAt: timestamp('resolution_due_at', { withTimezone: true }),
+  firstResponseAt: timestamp('first_response_at', { withTimezone: true }),
+  firstResolvedAt: timestamp('first_resolved_at', { withTimezone: true }),
+  finalResolvedAt: timestamp('final_resolved_at', { withTimezone: true }),
+  slaResponseBreached: boolean('sla_response_breached').notNull().default(false),
+  slaResolutionBreached: boolean('sla_resolution_breached').notNull().default(false),
+  slaPolicyId: bigint('sla_policy_id', { mode: 'number' }).references(() => slaPolicy.id),
 }, (t) => ({
   statusIdx: index('idx_requests_status').on(t.status),
   orgIdx: index('idx_requests_org').on(t.org),
@@ -91,6 +123,7 @@ export const requests = pgTable('requests', {
   requesterIdx: index('idx_requests_requester').on(t.requesterId),
   createdIdx: index('idx_requests_created').on(t.createdAt),
   parentIdx: index('idx_requests_parent').on(t.parentRequestId),
+  priorityIdx: index('idx_requests_priority').on(t.priorityLevelCol),
   // 메일 스레드 중복 접수 방지 (원본 schema.sql의 부분 UNIQUE 인덱스 이식)
   threadIdx: uniqueIndex('idx_requests_thread').on(t.sourceThreadId)
     .where(sql`source_thread_id is not null`),
@@ -101,6 +134,7 @@ export const requestComments = pgTable('request_comments', {
   requestId: bigint('request_id', { mode: 'number' }).notNull().references(() => requests.id, { onDelete: 'cascade' }),
   authorId: uuid('author_id').references(() => users.id),
   body: text('body').notNull(),
+  isInternal: boolean('is_internal').notNull().default(true),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({
   requestIdx: index('idx_comments_request').on(t.requestId),
@@ -120,6 +154,7 @@ export const requestStatusHistory = pgTable('request_status_history', {
 export const requestAttachments = pgTable('request_attachments', {
   id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
   requestId: bigint('request_id', { mode: 'number' }).notNull().references(() => requests.id, { onDelete: 'cascade' }),
+  commentId: bigint('comment_id', { mode: 'number' }).references(() => requestComments.id, { onDelete: 'set null' }),
   storagePath: text('storage_path').notNull(),
   fileName: text('file_name'),
   fileSize: bigint('file_size', { mode: 'number' }),

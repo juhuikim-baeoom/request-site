@@ -1,5 +1,5 @@
 import { pool, db } from './client.js'
-import { users, orgDirectory, requestTypes } from './schema.js'
+import { users, orgDirectory, requestTypes, slaPolicy, holidays } from './schema.js'
 import { sql } from 'drizzle-orm'
 
 async function seed() {
@@ -31,6 +31,19 @@ async function seed() {
     deptFunction: '시스템팀',
     role: 'system',
   }).onConflictDoNothing()
+
+  // SLA 정책 4행
+  await db.insert(slaPolicy).values([
+    { priorityLevel: 'P1', responseMinutes: 120, resolutionMinutes: 480 },
+    { priorityLevel: 'P2', responseMinutes: 240, resolutionMinutes: 960 },
+    { priorityLevel: 'P3', responseMinutes: 480, resolutionMinutes: 1920 },
+    { priorityLevel: 'P4', responseMinutes: 960, resolutionMinutes: null },
+  ]).onConflictDoNothing()
+
+  // 공휴일 1행
+  await db.insert(holidays).values([
+    { holidayOn: '2026-01-01', label: '신정' },
+  ]).onConflictDoNothing()
 
   const res = await db.execute<{ count: number }>(
     sql`select count(*)::int as count from users`,

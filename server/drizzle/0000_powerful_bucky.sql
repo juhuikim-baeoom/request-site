@@ -1,9 +1,15 @@
+CREATE TYPE "public"."priority_level" AS ENUM('P1', 'P2', 'P3', 'P4');--> statement-breakpoint
 CREATE TYPE "public"."request_org" AS ENUM('배움', '배론', '허브', '공통');--> statement-breakpoint
-CREATE TYPE "public"."request_priority" AS ENUM('긴급', '보통', '낮음');--> statement-breakpoint
 CREATE TYPE "public"."request_source" AS ENUM('web', 'email');--> statement-breakpoint
-CREATE TYPE "public"."request_status" AS ENUM('접수', '확인', '진행중', '검수대기', '재작업', '완료', '보류', '반려', '이관', '철회');--> statement-breakpoint
+CREATE TYPE "public"."request_status" AS ENUM('접수', '진행중', '보류', '완료', '반려', '철회');--> statement-breakpoint
 CREATE TYPE "public"."request_visibility" AS ENUM('private', 'dept', 'function', 'org', 'shared');--> statement-breakpoint
+CREATE TYPE "public"."urgency_level" AS ENUM('높음', '보통', '낮음');--> statement-breakpoint
 CREATE TYPE "public"."user_role" AS ENUM('staff', 'system', 'viewer');--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS "holidays" (
+	"holiday_on" date PRIMARY KEY NOT NULL,
+	"label" text
+);
+--> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "org_directory" (
 	"email" text PRIMARY KEY NOT NULL,
 	"name" text NOT NULL,
@@ -18,6 +24,7 @@ CREATE TABLE IF NOT EXISTS "org_directory" (
 CREATE TABLE IF NOT EXISTS "request_attachments" (
 	"id" bigint PRIMARY KEY GENERATED ALWAYS AS IDENTITY (sequence name "request_attachments_id_seq" INCREMENT BY 1 MINVALUE 1 MAXVALUE 9223372036854775807 START WITH 1 CACHE 1),
 	"request_id" bigint NOT NULL,
+	"comment_id" bigint,
 	"storage_path" text NOT NULL,
 	"file_name" text,
 	"file_size" bigint,
@@ -31,6 +38,7 @@ CREATE TABLE IF NOT EXISTS "request_comments" (
 	"request_id" bigint NOT NULL,
 	"author_id" uuid,
 	"body" text NOT NULL,
+	"is_internal" boolean DEFAULT true NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
@@ -65,7 +73,6 @@ CREATE TABLE IF NOT EXISTS "requests" (
 	"source" "request_source" DEFAULT 'web' NOT NULL,
 	"org" "request_org" NOT NULL,
 	"type_code" text NOT NULL,
-	"priority" "request_priority" DEFAULT '보통' NOT NULL,
 	"title" text NOT NULL,
 	"body" text,
 	"requester_id" uuid,
@@ -78,7 +85,6 @@ CREATE TABLE IF NOT EXISTS "requests" (
 	"requester_org" "request_org",
 	"requester_function" text,
 	"desired_due" date,
-	"first_completed_at" timestamp with time zone,
 	"completed_at" timestamp with time zone,
 	"rework_count" integer DEFAULT 0 NOT NULL,
 	"parent_request_id" bigint,
@@ -86,7 +92,40 @@ CREATE TABLE IF NOT EXISTS "requests" (
 	"is_locked" boolean DEFAULT false NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"urgency" "urgency_level" DEFAULT '보통' NOT NULL,
+	"impact" "urgency_level",
+	"priority_level" "priority_level",
+	"intake_detail" jsonb DEFAULT '{}'::jsonb NOT NULL,
+	"csat_rating" smallint,
+	"csat_comment" text,
+	"hold_reason" text,
+	"reject_reason" text,
+	"rework_reason" text,
+	"assigned_at" timestamp with time zone,
+	"response_due_at" timestamp with time zone,
+	"resolution_due_at" timestamp with time zone,
+	"first_response_at" timestamp with time zone,
+	"first_resolved_at" timestamp with time zone,
+	"final_resolved_at" timestamp with time zone,
+	"sla_response_breached" boolean DEFAULT false NOT NULL,
+	"sla_resolution_breached" boolean DEFAULT false NOT NULL,
+	"sla_policy_id" bigint,
 	CONSTRAINT "requests_seq_unique" UNIQUE("seq")
+);
+--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS "sessions" (
+	"id" text PRIMARY KEY NOT NULL,
+	"user_id" uuid NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"expires_at" timestamp with time zone NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE IF NOT EXISTS "sla_policy" (
+	"id" bigint PRIMARY KEY GENERATED ALWAYS AS IDENTITY (sequence name "sla_policy_id_seq" INCREMENT BY 1 MINVALUE 1 MAXVALUE 9223372036854775807 START WITH 1 CACHE 1),
+	"priority_level" "priority_level" NOT NULL,
+	"response_minutes" integer NOT NULL,
+	"resolution_minutes" integer,
+	CONSTRAINT "sla_policy_priority_level_unique" UNIQUE("priority_level")
 );
 --> statement-breakpoint
 CREATE TABLE IF NOT EXISTS "users" (
@@ -105,6 +144,12 @@ CREATE TABLE IF NOT EXISTS "users" (
 --> statement-breakpoint
 DO $$ BEGIN
  ALTER TABLE "request_attachments" ADD CONSTRAINT "request_attachments_request_id_requests_id_fk" FOREIGN KEY ("request_id") REFERENCES "public"."requests"("id") ON DELETE cascade ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "request_attachments" ADD CONSTRAINT "request_attachments_comment_id_request_comments_id_fk" FOREIGN KEY ("comment_id") REFERENCES "public"."request_comments"("id") ON DELETE set null ON UPDATE no action;
 EXCEPTION
  WHEN duplicate_object THEN null;
 END $$;
@@ -163,6 +208,24 @@ EXCEPTION
  WHEN duplicate_object THEN null;
 END $$;
 --> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "requests" ADD CONSTRAINT "requests_parent_request_id_requests_id_fk" FOREIGN KEY ("parent_request_id") REFERENCES "public"."requests"("id") ON DELETE no action ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "requests" ADD CONSTRAINT "requests_sla_policy_id_sla_policy_id_fk" FOREIGN KEY ("sla_policy_id") REFERENCES "public"."sla_policy"("id") ON DELETE no action ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
+DO $$ BEGIN
+ ALTER TABLE "sessions" ADD CONSTRAINT "sessions_user_id_users_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."users"("id") ON DELETE cascade ON UPDATE no action;
+EXCEPTION
+ WHEN duplicate_object THEN null;
+END $$;
+--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "idx_attach_request" ON "request_attachments" USING btree ("request_id");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "idx_comments_request" ON "request_comments" USING btree ("request_id");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "idx_shared_targets_request" ON "request_shared_targets" USING btree ("request_id");--> statement-breakpoint
@@ -172,4 +235,7 @@ CREATE INDEX IF NOT EXISTS "idx_requests_org" ON "requests" USING btree ("org");
 CREATE INDEX IF NOT EXISTS "idx_requests_assignee" ON "requests" USING btree ("assignee_id");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "idx_requests_requester" ON "requests" USING btree ("requester_id");--> statement-breakpoint
 CREATE INDEX IF NOT EXISTS "idx_requests_created" ON "requests" USING btree ("created_at");--> statement-breakpoint
-CREATE INDEX IF NOT EXISTS "idx_requests_parent" ON "requests" USING btree ("parent_request_id");
+CREATE INDEX IF NOT EXISTS "idx_requests_parent" ON "requests" USING btree ("parent_request_id");--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "idx_requests_priority" ON "requests" USING btree ("priority_level");--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "idx_requests_thread" ON "requests" USING btree ("source_thread_id") WHERE source_thread_id is not null;--> statement-breakpoint
+CREATE INDEX IF NOT EXISTS "idx_sessions_user" ON "sessions" USING btree ("user_id");

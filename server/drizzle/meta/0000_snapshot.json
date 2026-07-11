@@ -1,9 +1,34 @@
 {
-  "id": "2a12aa93-2296-444f-a998-62a46e17c664",
+  "id": "9acc32d1-8120-4c2c-9ab6-eef2e1e134f7",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
+    "public.holidays": {
+      "name": "holidays",
+      "schema": "",
+      "columns": {
+        "holiday_on": {
+          "name": "holiday_on",
+          "type": "date",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "label": {
+          "name": "label",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
     "public.org_directory": {
       "name": "org_directory",
       "schema": "",
@@ -97,6 +122,12 @@
           "primaryKey": false,
           "notNull": true
         },
+        "comment_id": {
+          "name": "comment_id",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
+        },
         "storage_path": {
           "name": "storage_path",
           "type": "text",
@@ -166,6 +197,19 @@
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
+        "request_attachments_comment_id_request_comments_id_fk": {
+          "name": "request_attachments_comment_id_request_comments_id_fk",
+          "tableFrom": "request_attachments",
+          "tableTo": "request_comments",
+          "columnsFrom": [
+            "comment_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
         "request_attachments_uploaded_by_users_id_fk": {
           "name": "request_attachments_uploaded_by_users_id_fk",
           "tableFrom": "request_attachments",
@@ -224,6 +268,13 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true
+        },
+        "is_internal": {
+          "name": "is_internal",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
         },
         "created_at": {
           "name": "created_at",
@@ -572,14 +623,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "priority": {
-          "name": "priority",
-          "type": "request_priority",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'보통'"
-        },
         "title": {
           "name": "title",
           "type": "text",
@@ -657,12 +700,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "first_completed_at": {
-          "name": "first_completed_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
         "completed_at": {
           "name": "completed_at",
           "type": "timestamp with time zone",
@@ -708,6 +745,121 @@
           "primaryKey": false,
           "notNull": true,
           "default": "now()"
+        },
+        "urgency": {
+          "name": "urgency",
+          "type": "urgency_level",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'보통'"
+        },
+        "impact": {
+          "name": "impact",
+          "type": "urgency_level",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "priority_level": {
+          "name": "priority_level",
+          "type": "priority_level",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "intake_detail": {
+          "name": "intake_detail",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'{}'::jsonb"
+        },
+        "csat_rating": {
+          "name": "csat_rating",
+          "type": "smallint",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "csat_comment": {
+          "name": "csat_comment",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "hold_reason": {
+          "name": "hold_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "reject_reason": {
+          "name": "reject_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "rework_reason": {
+          "name": "rework_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "assigned_at": {
+          "name": "assigned_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "response_due_at": {
+          "name": "response_due_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "resolution_due_at": {
+          "name": "resolution_due_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "first_response_at": {
+          "name": "first_response_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "first_resolved_at": {
+          "name": "first_resolved_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "final_resolved_at": {
+          "name": "final_resolved_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "sla_response_breached": {
+          "name": "sla_response_breached",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "sla_resolution_breached": {
+          "name": "sla_resolution_breached",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "sla_policy_id": {
+          "name": "sla_policy_id",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": false
         }
       },
       "indexes": {
@@ -800,6 +952,37 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "idx_requests_priority": {
+          "name": "idx_requests_priority",
+          "columns": [
+            {
+              "expression": "priority_level",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_requests_thread": {
+          "name": "idx_requests_thread",
+          "columns": [
+            {
+              "expression": "source_thread_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "where": "source_thread_id is not null",
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -841,6 +1024,32 @@
           ],
           "onDelete": "no action",
           "onUpdate": "no action"
+        },
+        "requests_parent_request_id_requests_id_fk": {
+          "name": "requests_parent_request_id_requests_id_fk",
+          "tableFrom": "requests",
+          "tableTo": "requests",
+          "columnsFrom": [
+            "parent_request_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "requests_sla_policy_id_sla_policy_id_fk": {
+          "name": "requests_sla_policy_id_sla_policy_id_fk",
+          "tableFrom": "requests",
+          "tableTo": "sla_policy",
+          "columnsFrom": [
+            "sla_policy_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -850,6 +1059,131 @@
           "nullsNotDistinct": false,
           "columns": [
             "seq"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.sessions": {
+      "name": "sessions",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "idx_sessions_user": {
+          "name": "idx_sessions_user",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "sessions_user_id_users_id_fk": {
+          "name": "sessions_user_id_users_id_fk",
+          "tableFrom": "sessions",
+          "tableTo": "users",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.sla_policy": {
+      "name": "sla_policy",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "bigint",
+          "primaryKey": true,
+          "notNull": true,
+          "identity": {
+            "type": "always",
+            "name": "sla_policy_id_seq",
+            "schema": "public",
+            "increment": "1",
+            "startWith": "1",
+            "minValue": "1",
+            "maxValue": "9223372036854775807",
+            "cache": "1",
+            "cycle": false
+          }
+        },
+        "priority_level": {
+          "name": "priority_level",
+          "type": "priority_level",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "response_minutes": {
+          "name": "response_minutes",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "resolution_minutes": {
+          "name": "resolution_minutes",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "sla_policy_priority_level_unique": {
+          "name": "sla_policy_priority_level_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "priority_level"
           ]
         }
       },
@@ -946,6 +1280,16 @@
     }
   },
   "enums": {
+    "public.priority_level": {
+      "name": "priority_level",
+      "schema": "public",
+      "values": [
+        "P1",
+        "P2",
+        "P3",
+        "P4"
+      ]
+    },
     "public.request_org": {
       "name": "request_org",
       "schema": "public",
@@ -954,15 +1298,6 @@
         "배론",
         "허브",
         "공통"
-      ]
-    },
-    "public.request_priority": {
-      "name": "request_priority",
-      "schema": "public",
-      "values": [
-        "긴급",
-        "보통",
-        "낮음"
       ]
     },
     "public.request_source": {
@@ -978,14 +1313,10 @@
       "schema": "public",
       "values": [
         "접수",
-        "확인",
         "진행중",
-        "검수대기",
-        "재작업",
-        "완료",
         "보류",
+        "완료",
         "반려",
-        "이관",
         "철회"
       ]
     },
@@ -998,6 +1329,15 @@
         "function",
         "org",
         "shared"
+      ]
+    },
+    "public.urgency_level": {
+      "name": "urgency_level",
+      "schema": "public",
+      "values": [
+        "높음",
+        "보통",
+        "낮음"
       ]
     },
     "public.user_role": {
