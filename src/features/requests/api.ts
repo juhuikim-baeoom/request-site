@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { supabase } from '../../lib/supabase'
+import { apiGet, apiSend, apiUpload, API_BASE } from '../../lib/api'
 import type {
   RequestOrg,
   RequestPriority,
@@ -17,20 +17,11 @@ import type {
   SharedTargetType,
 } from '../../types/database'
 
-const ATTACHMENT_BUCKET = 'request-attachments'
-
-/** 내가 볼 수 있는 요청 목록 (request_view, RLS로 공개범위 적용). 최신순 */
+/** 내가 볼 수 있는 요청 목록 (공개범위 적용). 최신순 */
 export function useRequestViews() {
   return useQuery({
     queryKey: ['requests', 'view'],
-    queryFn: async (): Promise<RequestView[]> => {
-      const { data, error } = await supabase
-        .from('request_view')
-        .select('*')
-        .order('created_at', { ascending: false })
-      if (error) throw error
-      return data ?? []
-    },
+    queryFn: () => apiGet<RequestView[]>('/api/requests'),
   })
 }
 
@@ -39,10 +30,9 @@ export function useVisibleSharedTargets() {
   return useQuery({
     queryKey: ['requests', 'shared_targets'],
     queryFn: async (): Promise<Map<number, RequestSharedTarget[]>> => {
-      const { data, error } = await supabase.from('request_shared_targets').select('*')
-      if (error) throw error
+      const rows = await apiGet<RequestSharedTarget[]>('/api/requests/shared-targets')
       const map = new Map<number, RequestSharedTarget[]>()
-      for (const t of data ?? []) {
+      for (const t of rows) {
         const list = map.get(t.request_id) ?? []
         list.push(t)
         map.set(t.request_id, list)
@@ -72,37 +62,7 @@ export function useRequestDetail(id: number) {
   return useQuery({
     queryKey: ['requests', 'detail', id],
     enabled: Number.isFinite(id),
-    queryFn: async (): Promise<RequestDetailData> => {
-      const { data: view, error } = await supabase
-        .from('request_view')
-        .select('*')
-        .eq('id', id)
-        .single()
-      if (error) throw error
-      const v = view as RequestView
-
-      const ids = [v.requester_id, v.assignee_id].filter((x): x is string => !!x)
-      const byId = new Map<string, PersonRef>()
-      if (ids.length) {
-        const { data: profs } = await supabase
-          .from('profiles')
-          .select('id, name, email, dept_function, org_affil')
-          .in('id', ids)
-        for (const p of profs ?? []) byId.set(p.id, p as PersonRef)
-      }
-
-      const { data: shared } = await supabase
-        .from('request_shared_targets')
-        .select('*')
-        .eq('request_id', id)
-
-      return {
-        view: v,
-        requester: v.requester_id ? byId.get(v.requester_id) ?? null : null,
-        assignee: v.assignee_id ? byId.get(v.assignee_id) ?? null : null,
-        sharedTargets: shared ?? [],
-      }
-    },
+    queryFn: () => apiGet<RequestDetailData>(`/api/requests/${id}`),
   })
 }
 
@@ -114,15 +74,7 @@ export function useRequestComments(id: number) {
   return useQuery({
     queryKey: ['requests', 'comments', id],
     enabled: Number.isFinite(id),
-    queryFn: async (): Promise<CommentWithAuthor[]> => {
-      const { data, error } = await supabase
-        .from('request_comments')
-        .select('*, author:profiles(name)')
-        .eq('request_id', id)
-        .order('created_at', { ascending: true })
-      if (error) throw error
-      return (data ?? []) as unknown as CommentWithAuthor[]
-    },
+    queryFn: () => apiGet<CommentWithAuthor[]>(`/api/requests/${id}/comments`),
   })
 }
 
@@ -134,15 +86,7 @@ export function useRequestHistory(id: number) {
   return useQuery({
     queryKey: ['requests', 'history', id],
     enabled: Number.isFinite(id),
-    queryFn: async (): Promise<HistoryWithActor[]> => {
-      const { data, error } = await supabase
-        .from('request_status_history')
-        .select('*, actor:profiles(name)')
-        .eq('request_id', id)
-        .order('changed_at', { ascending: true })
-      if (error) throw error
-      return (data ?? []) as unknown as HistoryWithActor[]
-    },
+    queryFn: () => apiGet<HistoryWithActor[]>(`/api/requests/${id}/history`),
   })
 }
 
@@ -150,39 +94,20 @@ export function useRequestAttachments(id: number) {
   return useQuery({
     queryKey: ['requests', 'attachments', id],
     enabled: Number.isFinite(id),
-    queryFn: async (): Promise<RequestAttachment[]> => {
-      const { data, error } = await supabase
-        .from('request_attachments')
-        .select('*')
-        .eq('request_id', id)
-        .order('created_at', { ascending: true })
-      if (error) throw error
-      return data ?? []
-    },
+    queryFn: () => apiGet<RequestAttachment[]>(`/api/requests/${id}/attachments`),
   })
 }
 
-/** 첨부 다운로드용 서명 URL (비공개 버킷) */
-export async function getAttachmentUrl(path: string): Promise<string | null> {
-  const { data } = await supabase.storage.from(ATTACHMENT_BUCKET).createSignedUrl(path, 60)
-  return data?.signedUrl ?? null
+/** 첨부 다운로드 URL (권한 검사는 서버가 수행) */
+export function getAttachmentUrl(attachmentId: number): string {
+  return `${API_BASE}/api/attachments/${attachmentId}/download`
 }
 
 export function useAddComment(requestId: number) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: async (body: string) => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
-      if (!user) throw new Error('로그인이 필요합니다.')
-      const { error } = await supabase.from('request_comments').insert({
-        request_id: requestId,
-        author_id: user.id,
-        body: body.trim(),
-      })
-      if (error) throw error
-    },
+    mutationFn: (body: string) =>
+      apiSend('POST', `/api/requests/${requestId}/comments`, { body: body.trim() }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['requests', 'comments', requestId] })
     },
@@ -201,10 +126,7 @@ export interface UpdateRequestInput {
 export function useUpdateRequest(id: number) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: async (patch: UpdateRequestInput) => {
-      const { error } = await supabase.from('requests').update(patch).eq('id', id)
-      if (error) throw error
-    },
+    mutationFn: (patch: UpdateRequestInput) => apiSend('PATCH', `/api/requests/${id}`, patch),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['requests', 'detail', id] })
       void queryClient.invalidateQueries({ queryKey: ['requests', 'view'] })
@@ -216,10 +138,7 @@ export function useUpdateRequest(id: number) {
 export function useCancelRequest(id: number) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: async () => {
-      const { error } = await supabase.from('requests').update({ status: '철회' }).eq('id', id)
-      if (error) throw error
-    },
+    mutationFn: () => apiSend('PATCH', `/api/requests/${id}`, { status: '철회' }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['requests', 'detail', id] })
       void queryClient.invalidateQueries({ queryKey: ['requests', 'view'] })
@@ -238,18 +157,11 @@ export interface BoardProfile {
   dept_function: string | null
 }
 
-/** 전체 프로필 (담당자 후보·이름 매핑용). prof_read 완화로 로그인 사용자 조회 가능 */
+/** 전체 프로필 (담당자 후보·이름 매핑용) */
 export function useAllProfiles() {
   return useQuery({
     queryKey: ['profiles', 'all'],
-    queryFn: async (): Promise<BoardProfile[]> => {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('id, name, email, role, org_affil, dept_function')
-        .order('name')
-      if (error) throw error
-      return (data ?? []) as BoardProfile[]
-    },
+    queryFn: () => apiGet<BoardProfile[]>('/api/profiles'),
     staleTime: 5 * 60_000,
   })
 }
@@ -258,15 +170,11 @@ export function useAllProfiles() {
 export function useBoardUpdate() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: async (vars: {
+    mutationFn: (vars: {
       id: number
       patch: { status?: RequestStatus; assignee_id?: string | null }
-    }) => {
-      const { error } = await supabase.from('requests').update(vars.patch).eq('id', vars.id)
-      if (error) throw error
-    },
+    }) => apiSend('PATCH', `/api/requests/${vars.id}`, vars.patch),
     onSuccess: () => {
-      // ['requests'] 하위(view/detail/history) 전부 무효화
       void queryClient.invalidateQueries({ queryKey: ['requests'] })
     },
   })
@@ -276,15 +184,7 @@ export function useBoardUpdate() {
 export function useRequestTypes() {
   return useQuery({
     queryKey: ['request_types'],
-    queryFn: async (): Promise<RequestType[]> => {
-      const { data, error } = await supabase
-        .from('request_types')
-        .select('*')
-        .eq('active', true)
-        .order('sort_order')
-      if (error) throw error
-      return data ?? []
-    },
+    queryFn: () => apiGet<RequestType[]>('/api/request-types'),
     staleTime: 5 * 60_000,
   })
 }
@@ -293,11 +193,7 @@ export function useRequestTypes() {
 export function useDeptOptions() {
   return useQuery({
     queryKey: ['dept_options'],
-    queryFn: async (): Promise<DeptOption[]> => {
-      const { data, error } = await supabase.rpc('list_dept_options')
-      if (error) throw error
-      return data ?? []
-    },
+    queryFn: () => apiGet<DeptOption[]>('/api/dept-options'),
     staleTime: 10 * 60_000,
   })
 }
@@ -319,89 +215,34 @@ export interface CreateRequestInput {
   sharedTargets: SharedTargetInput[]
 }
 
-/**
- * Storage key 는 ASCII(영문/숫자/하이픈/점)만 허용되므로 확장자만 안전하게 추출한다.
- * 원본 파일명(한글 포함)은 request_attachments.file_name 에 별도 저장한다.
- */
-function safeExt(name: string): string {
-  const dot = name.lastIndexOf('.')
-  if (dot < 0) return ''
-  const ext = name.slice(dot + 1).toLowerCase().replace(/[^a-z0-9]/g, '')
-  return ext ? `.${ext}` : ''
-}
-
-/** 요청ID/타임스탬프-랜덤UUID.확장자 형태의 ASCII 전용 Storage 경로 */
-function buildStoragePath(requestId: number, fileName: string): string {
-  return `${requestId}/${Date.now()}-${crypto.randomUUID()}${safeExt(fileName)}`
-}
-
-/** 요청 생성 → 접수번호 반환. 첨부가 있으면 Storage 업로드 후 메타 기록 */
+/** 요청 생성 → 접수번호 포함 행 반환. 첨부가 있으면 개별 업로드 */
 export function useCreateRequest() {
   const queryClient = useQueryClient()
 
   return useMutation({
     mutationFn: async (input: CreateRequestInput): Promise<RequestRow> => {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
-      if (!user) throw new Error('로그인이 필요합니다.')
+      // 1) 요청 생성 (+ 공유대상). seq/스냅샷은 서버 트리거가 채움
+      const request = await apiSend<RequestRow>('POST', '/api/requests', {
+        org: input.org,
+        type_code: input.type_code,
+        priority: input.priority,
+        visibility: input.visibility,
+        title: input.title.trim(),
+        body: input.body,
+        desired_due: input.desired_due || null,
+        sharedTargets: input.sharedTargets,
+      })
 
-      // 1) requests insert (seq/스냅샷은 트리거가 채움) → 생성된 행 반환
-      const { data: created, error: insertError } = await supabase
-        .from('requests')
-        .insert({
-          org: input.org,
-          type_code: input.type_code,
-          priority: input.priority,
-          visibility: input.visibility,
-          title: input.title.trim(),
-          body: input.body,
-          desired_due: input.desired_due || null,
-          requester_id: user.id,
-        })
-        .select('*')
-        .single()
-
-      if (insertError) throw insertError
-      const request = created as RequestRow
-
-      // 2) 추가 공유 대상(다중) 기록
-      if (input.sharedTargets.length > 0) {
-        const { error: sharedError } = await supabase.from('request_shared_targets').insert(
-          input.sharedTargets.map((t) => ({
-            request_id: request.id,
-            target_type: t.target_type,
-            target_value: t.target_value,
-          })),
-        )
-        if (sharedError) throw sharedError
-      }
-
-      // 3) 첨부 업로드 → request_attachments 기록
-      if (input.files.length > 0) {
-        for (const file of input.files) {
-          const path = buildStoragePath(request.id, file.name)
-          const { error: uploadError } = await supabase.storage
-            .from(ATTACHMENT_BUCKET)
-            .upload(path, file, { upsert: false })
-          if (uploadError) throw uploadError
-
-          const { error: metaError } = await supabase.from('request_attachments').insert({
-            request_id: request.id,
-            storage_path: path,
-            file_name: file.name, // 원본 파일명(한글 포함) 그대로 저장 → 화면 표시용
-            file_size: file.size,
-            mime_type: file.type || null,
-            uploaded_by: user.id,
-          })
-          if (metaError) throw metaError
-        }
+      // 2) 첨부 업로드 (각 파일 개별 multipart)
+      for (const file of input.files) {
+        const fd = new FormData()
+        fd.append('file', file, file.name)
+        await apiUpload(`/api/requests/${request.id}/attachments`, fd)
       }
 
       return request
     },
     onSuccess: () => {
-      // 목록 화면이 최신 데이터를 받도록 무효화
       void queryClient.invalidateQueries({ queryKey: ['requests'] })
     },
   })

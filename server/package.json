@@ -1,0 +1,40 @@
+{
+  "name": "request-site-server",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx src/db/migrate.ts",
+    "db:seed": "tsx src/db/seed.ts",
+    "db:smoke": "tsx scripts/smoke.ts",
+    "test:auth": "tsx scripts/test-auth.ts",
+    "test:devlogin": "tsx scripts/test-devlogin.ts",
+    "test:authz": "tsx scripts/test-authz.ts",
+    "test:upsert": "tsx scripts/test-upsert.ts",
+    "test:api": "tsx scripts/test-api-list.ts",
+    "test:api-detail": "tsx scripts/test-api-detail.ts",
+    "test:api-write": "tsx scripts/test-api-write.ts",
+    "test:api-attach": "tsx scripts/test-api-attach.ts"
+  },
+  "dependencies": {
+    "@fastify/cookie": "^10.0.1",
+    "@fastify/cors": "^10.1.0",
+    "@fastify/multipart": "^9.4.0",
+    "@fastify/oauth2": "^8.2.0",
+    "dotenv": "^16.4.5",
+    "drizzle-orm": "^0.36.0",
+    "fastify": "^5.1.0",
+    "pg": "^8.13.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.4",
+    "@types/pg": "^8.11.10",
+    "drizzle-kit": "^0.28.0",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.2"
+  }
+}

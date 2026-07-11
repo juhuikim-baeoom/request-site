@@ -1,0 +1,22 @@
+services:
+  db:
+    image: postgres:16
+    container_name: request-site-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: request
+      POSTGRES_PASSWORD: request
+      POSTGRES_DB: request_site
+      TZ: Asia/Seoul
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U request -d request_site"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  pgdata:

@@ -53,9 +53,8 @@ export function RequestDetail() {
   const [editDue, setEditDue] = useState('')
   const [actionError, setActionError] = useState<string | null>(null)
 
-  async function handleDownload(path: string) {
-    const url = await getAttachmentUrl(path)
-    if (url) window.open(url, '_blank', 'noopener')
+  function handleDownload(attachmentId: number) {
+    window.open(getAttachmentUrl(attachmentId), '_blank', 'noopener')
   }
 
   async function handleAddComment(e: React.FormEvent) {
@@ -318,7 +317,7 @@ export function RequestDetail() {
             {attachments.map((a) => (
               <li key={a.id}>
                 <button
-                  onClick={() => void handleDownload(a.storage_path)}
+                  onClick={() => handleDownload(a.id)}
                   className="text-sm text-brand hover:underline"
                 >
                   {a.file_name ?? a.storage_path}

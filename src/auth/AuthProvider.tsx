@@ -1,93 +1,95 @@
-import { createContext, useEffect, useMemo, useState, type ReactNode } from 'react'
-import type { Session } from '@supabase/supabase-js'
-import { supabase } from '../lib/supabase'
-import type { Profile, UserRole } from '../types/database'
+import { createContext, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import type { RequestOrg, UserRole } from '../types/database'
+import { apiGet, apiSend, API_BASE } from '../lib/api'
+
+export interface AuthUser {
+  id: string
+  email: string
+  name: string | null
+  org_affil: RequestOrg | null
+  dept_function: string | null
+  role: UserRole
+}
 
 export interface AuthContextValue {
-  session: Session | null
-  profile: Profile | null
+  session: AuthUser | null
+  profile: AuthUser | null
   role: UserRole | null
   loading: boolean
-  signInWithGoogle: () => Promise<void>
+  signInWithGoogle: () => void
   signOut: () => Promise<void>
+  devLogin: () => Promise<void>
 }
 
 export const AuthContext = createContext<AuthContextValue | undefined>(undefined)
 
 // 허용 도메인 (요구사항: @baeoom.com / @baeron.com)
 const ALLOWED_DOMAINS = ['baeoom.com', 'baeron.com']
-
 export function isAllowedEmail(email: string | undefined | null): boolean {
   if (!email) return false
   const domain = email.split('@')[1]?.toLowerCase()
   return !!domain && ALLOWED_DOMAINS.includes(domain)
 }
 
+// 서버 /api/auth/me 응답(camelCase)을 프론트 AuthUser(snake_case) 로 매핑
+interface MeUser {
+  id: string
+  email: string
+  name: string | null
+  orgAffil: RequestOrg | null
+  deptFunction: string | null
+  role: UserRole
+}
+function mapUser(u: MeUser | null): AuthUser | null {
+  if (!u) return null
+  return {
+    id: u.id,
+    email: u.email,
+    name: u.name,
+    org_affil: u.orgAffil,
+    dept_function: u.deptFunction,
+    role: u.role,
+  }
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [session, setSession] = useState<Session | null>(null)
-  const [profile, setProfile] = useState<Profile | null>(null)
+  const [user, setUser] = useState<AuthUser | null>(null)
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
-    let active = true
-
-    supabase.auth.getSession().then(({ data }) => {
-      if (!active) return
-      setSession(data.session)
+  const refresh = useCallback(async () => {
+    try {
+      const { user } = await apiGet<{ user: MeUser | null }>('/api/auth/me')
+      setUser(mapUser(user))
+    } catch {
+      setUser(null)
+    } finally {
       setLoading(false)
-    })
-
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, next) => {
-      setSession(next)
-    })
-
-    return () => {
-      active = false
-      sub.subscription.unsubscribe()
     }
   }, [])
 
-  // 세션이 바뀌면 profiles 에서 역할/부서 정보를 로드
   useEffect(() => {
-    if (!session?.user) {
-      setProfile(null)
-      return
-    }
-    let active = true
-    supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', session.user.id)
-      .single()
-      .then(({ data }) => {
-        if (active) setProfile(data ?? null)
-      })
-    return () => {
-      active = false
-    }
-  }, [session])
+    void refresh()
+  }, [refresh])
 
   const value = useMemo<AuthContextValue>(
     () => ({
-      session,
-      profile,
-      role: profile?.role ?? null,
+      session: user,
+      profile: user,
+      role: user?.role ?? null,
       loading,
-      async signInWithGoogle() {
-        await supabase.auth.signInWithOAuth({
-          provider: 'google',
-          options: {
-            redirectTo: window.location.origin,
-            // 허용 도메인 힌트 (실제 차단은 Supabase Auth 설정/트리거에서 처리)
-            queryParams: { hd: ALLOWED_DOMAINS.join(',') },
-          },
-        })
+      signInWithGoogle() {
+        window.location.href = `${API_BASE}/api/auth/google`
       },
       async signOut() {
-        await supabase.auth.signOut()
+        await apiSend('POST', '/api/auth/logout')
+        setUser(null)
+      },
+      async devLogin() {
+        const { user } = await apiSend<{ user: MeUser }>('POST', '/api/auth/dev-login')
+        setUser(mapUser(user))
       },
     }),
-    [session, profile, loading],
+    [user, loading],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
