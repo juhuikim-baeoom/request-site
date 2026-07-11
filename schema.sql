@@ -24,22 +24,52 @@ create table profiles (
   created_at timestamptz not null default now()
 );
 
--- 가입 시 profiles 자동 생성 + 허용 도메인 제한
+-- 조직도 사전 등록 테이블: 직원 계정을 미리 등록해두면 최초 로그인 시 자동 반영
+-- (email PK. 데이터는 CSV import 등으로 별도 적재)
+create table org_directory (
+  email      text primary key,
+  name       text not null,
+  dept       text not null,
+  org_affil  request_org not null,
+  role       user_role not null default 'staff',
+  synced     boolean not null default false,          -- 실제 가입되어 profiles로 반영됐는지
+  created_at timestamptz not null default now()
+);
+
+-- 가입 시 profiles 자동 생성 + 허용 도메인 제한 + 조직도 사전등록 반영
 -- @baeoom.com / @baeron.com 이 아니면 예외 발생 → auth.users insert 롤백(가입 차단)
 -- (Google OAuth를 External로 설정해 Workspace Internal 제한을 못 쓰므로 DB에서 강제)
 create function handle_new_user() returns trigger
 language plpgsql security definer set search_path = public as $$
 declare
   email_domain text := lower(split_part(coalesce(new.email, ''), '@', 2));
+  dir org_directory%rowtype;
 begin
+  -- 1) 허용 도메인 외 가입 차단
   if email_domain not in ('baeoom.com', 'baeron.com') then
     raise exception '허용되지 않은 도메인입니다. @baeoom.com 또는 @baeron.com 계정만 이용할 수 있습니다.'
       using errcode = 'P0001', hint = 'DOMAIN_NOT_ALLOWED';
   end if;
 
-  insert into profiles (id, email, name)
-  values (new.id, new.email, coalesce(new.raw_user_meta_data->>'full_name', new.email))
-  on conflict (id) do nothing;
+  -- 2) org_directory 사전 등록 정보 조회 (이메일 대소문자 무시)
+  select * into dir from org_directory
+  where lower(email) = lower(new.email)
+  limit 1;
+
+  if found then
+    -- 사전 등록된 직원: name·dept·org_affil·role 그대로 반영
+    insert into profiles (id, email, name, dept, org_affil, role)
+    values (new.id, new.email, dir.name, dir.dept, dir.org_affil, dir.role)
+    on conflict (id) do nothing;
+
+    update org_directory set synced = true where lower(email) = lower(new.email);
+  else
+    -- 미등록 이메일: 기본값(role=staff, dept/org_affil=null)
+    insert into profiles (id, email, name)
+    values (new.id, new.email, coalesce(new.raw_user_meta_data->>'full_name', new.email))
+    on conflict (id) do nothing;
+  end if;
+
   return new;
 end $$;
 
