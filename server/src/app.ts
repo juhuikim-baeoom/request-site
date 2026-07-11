@@ -10,6 +10,7 @@ import { metaRoutes } from './routes/meta.js'
 import { requestRoutes } from './routes/requests.js'
 import { requestDetailRoutes } from './routes/request-detail.js'
 import { attachmentRoutes } from './routes/attachments.js'
+import { dashboardRoutes } from './routes/dashboard.js'
 import './types.js'
 
 export async function buildApp(): Promise<FastifyInstance> {
@@ -30,6 +31,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(requestRoutes)
   await app.register(requestDetailRoutes)
   await app.register(attachmentRoutes)
+  await app.register(dashboardRoutes)
 
   return app
 }

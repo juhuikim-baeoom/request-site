@@ -26,7 +26,8 @@
     "test:assign": "tsx scripts/test-assign.ts",
     "test:intake": "tsx scripts/test-intake.ts",
     "test:comment-internal": "tsx scripts/test-comment-internal.ts",
-    "test:comment-attach": "tsx scripts/test-comment-attach.ts"
+    "test:comment-attach": "tsx scripts/test-comment-attach.ts",
+    "test:dashboard": "tsx scripts/test-dashboard.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^10.0.1",
