@@ -219,8 +219,9 @@ create trigger trg_requests_snapshot before insert on requests
 for each row execute function snapshot_requester();
 
 -- 상태 변경 처리: 이력 기록 + 완료일/재작업 자동 관리
+-- security definer: request_status_history(INSERT 정책 없음)에 트리거가 기록하기 위함
 create function on_status_change() returns trigger
-language plpgsql as $$
+language plpgsql security definer set search_path = public as $$
 begin
   if new.status is distinct from old.status then
     insert into request_status_history (request_id, from_status, to_status, changed_by)
