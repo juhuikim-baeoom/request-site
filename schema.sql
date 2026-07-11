@@ -187,11 +187,11 @@ begin new.updated_at = now(); return new; end $$;
 create trigger trg_requests_touch before update on requests
 for each row execute function touch_updated_at();
 
--- 접수번호 생성: YYMMDD-NN (일자별 연번, 예: 260711-03)
+-- 접수번호 생성: YYMMDD-NN (일자별 연번, 예: 260711-03). 날짜는 한국표준시 기준
 -- advisory lock으로 동시 접수 시 번호 중복 방지
 create function gen_seq() returns trigger
 language plpgsql as $$
-declare d text := to_char(now(), 'YYMMDD'); n int;
+declare d text := to_char(now() at time zone 'Asia/Seoul', 'YYMMDD'); n int;
 begin
   if new.seq is not null then return new; end if;
   perform pg_advisory_xact_lock(hashtext('req_seq_' || d));
