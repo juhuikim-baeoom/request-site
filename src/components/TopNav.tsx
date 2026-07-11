@@ -28,8 +28,8 @@ export function TopNav() {
   const visibleItems = NAV_ITEMS.filter((item) => role && item.roles.includes(role))
 
   return (
-    <header className="border-b border-gray-200 bg-white">
-      <div className="mx-auto flex h-14 max-w-6xl items-center gap-6 px-4">
+    <header className="flex-none border-b border-gray-200 bg-white">
+      <div className="flex h-14 w-full items-center gap-6 px-4 sm:px-6">
         <span className="text-base font-bold text-brand">업무요청</span>
 
         <nav className="flex flex-1 items-center gap-1 overflow-x-auto">

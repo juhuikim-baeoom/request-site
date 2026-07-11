@@ -12,19 +12,22 @@ export const ORG_OPTIONS: RequestOrg[] = ['배움', '배론', '허브', '공통'
 // 우선순위 (request_priority enum)
 export const PRIORITY_OPTIONS: RequestPriority[] = ['긴급', '보통', '낮음']
 
-// 상태 (request_status enum)
+// 선택 가능한 상태 (request_status enum에서 '재작업' 제외 — 운영상 미사용)
+// (STATUS_BADGE에는 과거 데이터 대비 '재작업' 색상 유지)
 export const STATUS_OPTIONS: RequestStatus[] = [
   '접수',
   '확인',
   '진행중',
   '검수대기',
-  '재작업',
   '완료',
   '보류',
   '반려',
   '이관',
   '철회',
 ]
+
+// 관리 보드 칸반 컬럼 (선택 가능 상태와 동일)
+export const BOARD_STATUSES: RequestStatus[] = STATUS_OPTIONS
 
 // 상태별 뱃지 색상 (진한 배경 + 흰 글자로 한눈에 구분)
 export const STATUS_BADGE: Record<RequestStatus, string> = {

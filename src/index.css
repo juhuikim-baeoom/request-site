@@ -18,3 +18,26 @@ body {
     'Malgun Gothic', 'Noto Sans KR', Roboto, Helvetica, Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
+
+/* ---- 애니메이션 (관리 보드 등) ---- */
+@keyframes cardPop {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes viewEnter {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes railPulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+.animate-card-pop { animation: cardPop 0.4s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.animate-view-enter { animation: viewEnter 0.35s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.rail-pulse { animation: railPulse 1.8s ease-in-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-card-pop,
+  .animate-view-enter,
+  .rail-pulse { animation: none !important; }
+}

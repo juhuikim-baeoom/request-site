@@ -3,10 +3,13 @@ import { TopNav } from './TopNav'
 
 export function Layout() {
   return (
-    <div className="flex min-h-screen flex-col bg-gray-50">
+    // 앱 셸: 전체 화면 높이, 상단바 고정, 메인 바디에서만 스크롤
+    <div className="flex h-screen flex-col overflow-hidden bg-gray-50">
       <TopNav />
-      <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6">
-        <Outlet />
+      <main className="min-h-0 flex-1 overflow-y-auto">
+        <div className="w-full px-4 py-6 sm:px-6">
+          <Outlet />
+        </div>
       </main>
     </div>
   )
