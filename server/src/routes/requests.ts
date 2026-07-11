@@ -3,6 +3,7 @@ import { sql } from 'drizzle-orm'
 import { db, withUser } from '../db/client.js'
 import { authenticate } from '../auth/session.js'
 import { visibilityFilter, isSystem } from '../authz.js'
+import { parseId, isOneOf, ORGS, TYPE_CODES, PRIORITIES, VISIBILITIES, STATUSES } from '../http.js'
 
 export async function requestRoutes(app: FastifyInstance) {
   app.addHook('preHandler', authenticate)
@@ -33,6 +34,12 @@ export async function requestRoutes(app: FastifyInstance) {
     const u = request.currentUser!
     const b: any = request.body ?? {}
     if (!b.org || !b.type_code || !b.title?.trim()) { reply.code(400); return { error: 'invalid' } }
+    // enum 화이트리스트 검증 (잘못된 값이 DB까지 내려가 500 나는 것 방지)
+    if (
+      !isOneOf(ORGS, b.org) || !isOneOf(TYPE_CODES, b.type_code) ||
+      (b.priority !== undefined && !isOneOf(PRIORITIES, b.priority)) ||
+      (b.visibility !== undefined && !isOneOf(VISIBILITIES, b.visibility))
+    ) { reply.code(400); return { error: 'invalid enum' } }
     const created = await withUser(u.id, async (tx) => {
       const ins = await tx.execute<any>(sql`
         insert into requests (org, type_code, priority, visibility, title, body, desired_due, requester_id)
@@ -55,8 +62,15 @@ export async function requestRoutes(app: FastifyInstance) {
   // 수정/철회/보드 변경 통합
   app.patch<{ Params: { id: string }; Body: any }>('/api/requests/:id', async (request, reply) => {
     const u = request.currentUser!
-    const id = Number(request.params.id)
+    const id = parseId(request.params.id)
+    if (id === null) { reply.code(404); return { error: 'not found' } }
     const b: any = request.body ?? {}
+    // 수정 대상 enum 값 검증
+    if (
+      (b.priority !== undefined && !isOneOf(PRIORITIES, b.priority)) ||
+      (b.visibility !== undefined && !isOneOf(VISIBILITIES, b.visibility)) ||
+      (b.status !== undefined && !isOneOf(STATUSES, b.status))
+    ) { reply.code(400); return { error: 'invalid enum' } }
     const cur = await db.execute<any>(sql`select requester_id, status from requests where id = ${id}`)
     const row = cur.rows[0]
     if (!row) { reply.code(404); return { error: 'not found' } }

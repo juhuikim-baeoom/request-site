@@ -21,7 +21,15 @@ export async function googleRoutes(app: FastifyInstance) {
     const res = await fetch('https://openidconnect.googleapis.com/v1/userinfo', {
       headers: { Authorization: `Bearer ${token.access_token}` },
     })
-    const info = (await res.json()) as { email: string; name?: string; sub?: string }
+    const info = (await res.json()) as {
+      email: string; name?: string; sub?: string; email_verified?: boolean | string
+    }
+    // Google이 확인하지 않은 이메일은 신뢰하지 않음 (허용 도메인 위조 방지)
+    const verified = info.email_verified === true || info.email_verified === 'true'
+    if (!verified) {
+      reply.redirect(`${env.WEB_ORIGIN}/login?error=domain`)
+      return
+    }
     try {
       const { id } = await upsertUserFromEmail(info.email, info.name ?? null, info.sub ?? null)
       setSession(reply, id)

@@ -3,6 +3,7 @@ import { sql } from 'drizzle-orm'
 import { db } from '../db/client.js'
 import { authenticate } from '../auth/session.js'
 import { canSeeRequest } from '../authz.js'
+import { parseId } from '../http.js'
 import type { CurrentUser } from '../types.js'
 
 /** 요청 존재 여부와 열람 권한을 함께 판정 */
@@ -22,9 +23,9 @@ async function loadForSee(u: CurrentUser, id: number): Promise<{ found: boolean;
   return { found: true, ok }
 }
 
+// 존재하지 않음/권한 없음을 구분하지 않고 404로 통일 (요청 존재 여부 열거 방지)
 function guard(reply: any, found: boolean, ok: boolean): boolean {
-  if (!found) { reply.code(404).send({ error: 'not found' }); return false }
-  if (!ok) { reply.code(403).send({ error: 'forbidden' }); return false }
+  if (!found || !ok) { reply.code(404).send({ error: 'not found' }); return false }
   return true
 }
 
@@ -32,7 +33,9 @@ export async function requestDetailRoutes(app: FastifyInstance) {
   app.addHook('preHandler', authenticate)
 
   app.get<{ Params: { id: string } }>('/api/requests/:id', async (request, reply) => {
-    const u = request.currentUser!; const id = Number(request.params.id)
+    const u = request.currentUser!
+    const id = parseId(request.params.id)
+    if (id === null) { reply.code(404).send({ error: 'not found' }); return }
     const { found, ok } = await loadForSee(u, id)
     if (!guard(reply, found, ok)) return
 
@@ -56,7 +59,9 @@ export async function requestDetailRoutes(app: FastifyInstance) {
   })
 
   app.get<{ Params: { id: string } }>('/api/requests/:id/comments', async (request, reply) => {
-    const u = request.currentUser!; const id = Number(request.params.id)
+    const u = request.currentUser!
+    const id = parseId(request.params.id)
+    if (id === null) { reply.code(404).send({ error: 'not found' }); return }
     const { found, ok } = await loadForSee(u, id)
     if (!guard(reply, found, ok)) return
     const r = await db.execute<any>(sql`
@@ -67,7 +72,9 @@ export async function requestDetailRoutes(app: FastifyInstance) {
   })
 
   app.post<{ Params: { id: string }; Body: { body?: string } }>('/api/requests/:id/comments', async (request, reply) => {
-    const u = request.currentUser!; const id = Number(request.params.id)
+    const u = request.currentUser!
+    const id = parseId(request.params.id)
+    if (id === null) { reply.code(404).send({ error: 'not found' }); return }
     const { found, ok } = await loadForSee(u, id)
     if (!guard(reply, found, ok)) return
     const body = (request.body?.body ?? '').trim()
@@ -79,7 +86,9 @@ export async function requestDetailRoutes(app: FastifyInstance) {
   })
 
   app.get<{ Params: { id: string } }>('/api/requests/:id/history', async (request, reply) => {
-    const u = request.currentUser!; const id = Number(request.params.id)
+    const u = request.currentUser!
+    const id = parseId(request.params.id)
+    if (id === null) { reply.code(404).send({ error: 'not found' }); return }
     const { found, ok } = await loadForSee(u, id)
     if (!guard(reply, found, ok)) return
     const r = await db.execute<any>(sql`
@@ -90,7 +99,9 @@ export async function requestDetailRoutes(app: FastifyInstance) {
   })
 
   app.get<{ Params: { id: string } }>('/api/requests/:id/attachments', async (request, reply) => {
-    const u = request.currentUser!; const id = Number(request.params.id)
+    const u = request.currentUser!
+    const id = parseId(request.params.id)
+    if (id === null) { reply.code(404).send({ error: 'not found' }); return }
     const { found, ok } = await loadForSee(u, id)
     if (!guard(reply, found, ok)) return
     const r = await db.execute<any>(sql`

@@ -28,8 +28,12 @@ export function canSeeRequest(u: CurrentUser, req: ReqRef, shared: SharedRef[]):
     req.requesterOrg === u.orgAffil && req.requesterFunction === u.deptFunction
   ) return true
   for (const st of shared) {
-    if (st.targetType === 'function' && st.targetValue === u.deptFunction) return true
-    if (st.targetType === 'dept' && st.targetValue === `${u.orgAffil}|${u.deptFunction}`) return true
+    // NULL 직무/기관은 매칭 대상에서 제외 (원본 SQL의 NULL 전파 = 항상 거짓 재현)
+    if (st.targetType === 'function' && u.deptFunction != null && st.targetValue === u.deptFunction) return true
+    if (
+      st.targetType === 'dept' && u.orgAffil != null && u.deptFunction != null &&
+      st.targetValue === `${u.orgAffil}|${u.deptFunction}`
+    ) return true
   }
   return false
 }
@@ -43,7 +47,8 @@ export function visibilityFilter(u: CurrentUser): SQL {
   const uid = u.id
   const org = u.orgAffil
   const fn = u.deptFunction
-  const deptTarget = `${org}|${fn}`
+  // org/fn 중 하나라도 null이면 dept 공유대상은 매칭 불가(null 바인딩 → SQL에서 항상 거짓)
+  const deptTarget = org != null && fn != null ? `${org}|${fn}` : null
   return sql`(
     r.requester_id = ${uid}
     or r.visibility = 'shared'

@@ -2,6 +2,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify'
 import { eq } from 'drizzle-orm'
 import { db } from '../db/client.js'
 import { users } from '../db/schema.js'
+import { isLocal } from '../env.js'
 import type { CurrentUser } from '../types.js'
 
 const COOKIE = 'sid'
@@ -9,6 +10,7 @@ const COOKIE = 'sid'
 export function setSession(reply: FastifyReply, userId: string) {
   reply.setCookie(COOKIE, userId, {
     httpOnly: true, sameSite: 'lax', signed: true, path: '/',
+    secure: !isLocal, // 프로덕션(HTTPS)에서는 평문 HTTP 전송 차단
     maxAge: 60 * 60 * 24 * 30,
   })
 }
