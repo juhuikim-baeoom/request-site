@@ -14,11 +14,16 @@
     "test:auth": "tsx scripts/test-auth.ts",
     "test:devlogin": "tsx scripts/test-devlogin.ts",
     "test:authz": "tsx scripts/test-authz.ts",
-    "test:upsert": "tsx scripts/test-upsert.ts"
+    "test:upsert": "tsx scripts/test-upsert.ts",
+    "test:api": "tsx scripts/test-api-list.ts",
+    "test:api-detail": "tsx scripts/test-api-detail.ts",
+    "test:api-write": "tsx scripts/test-api-write.ts",
+    "test:api-attach": "tsx scripts/test-api-attach.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^10.0.1",
     "@fastify/cors": "^10.1.0",
+    "@fastify/multipart": "^9.4.0",
     "@fastify/oauth2": "^8.2.0",
     "dotenv": "^16.4.5",
     "drizzle-orm": "^0.36.0",
