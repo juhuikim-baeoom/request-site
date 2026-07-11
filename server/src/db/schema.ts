@@ -28,6 +28,16 @@ export const users = pgTable('users', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
 
+// 서버측 세션 저장소 — 쿠키에는 랜덤 토큰만 저장(사용자 id 아님), 로그아웃/무효화 가능
+export const sessions = pgTable('sessions', {
+  id: text('id').primaryKey(),
+  userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+}, (t) => ({
+  userIdx: index('idx_sessions_user').on(t.userId),
+}))
+
 export const orgDirectory = pgTable('org_directory', {
   email: text('email').primaryKey(),
   name: text('name').notNull(),

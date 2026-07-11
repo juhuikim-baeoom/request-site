@@ -32,7 +32,7 @@ export async function googleRoutes(app: FastifyInstance) {
     }
     try {
       const { id } = await upsertUserFromEmail(info.email, info.name ?? null, info.sub ?? null)
-      setSession(reply, id)
+      await setSession(reply, id)
       reply.redirect(env.WEB_ORIGIN)
     } catch (e) {
       if (e instanceof DomainNotAllowedError) {

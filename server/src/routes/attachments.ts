@@ -3,7 +3,7 @@ import { createReadStream } from 'node:fs'
 import { sql } from 'drizzle-orm'
 import { db } from '../db/client.js'
 import { authenticate } from '../auth/session.js'
-import { canSeeRequest } from '../authz.js'
+import { canSeeRequest, isViewerUp } from '../authz.js'
 import { saveUpload, resolveUpload } from '../storage.js'
 import { parseId } from '../http.js'
 import type { CurrentUser } from '../types.js'
@@ -44,7 +44,9 @@ export async function attachmentRoutes(app: FastifyInstance) {
     if (attId === null) { reply.code(404).send({ error: 'not found' }); return }
     const a = await db.execute<any>(sql`select * from request_attachments where id = ${attId}`)
     const att = a.rows[0]; if (!att) { reply.code(404).send({ error: 'not found' }); return }
-    if (!(await canSee(u, att.request_id))) { reply.code(404).send({ error: 'not found' }); return }
+    // 원본 스토리지 RLS 이식: 실제 파일 다운로드는 시스템·열람자 또는 업로더 본인만
+    // (파일명·존재는 canSeeRequest로 목록에 노출되지만, 바이트 다운로드는 더 좁게 제한)
+    if (!(isViewerUp(u) || att.uploaded_by === u.id)) { reply.code(404).send({ error: 'not found' }); return }
     reply.header('Content-Type', att.mime_type ?? 'application/octet-stream')
     reply.header('X-Content-Type-Options', 'nosniff') // 클라이언트 지정 MIME 스니핑 방지
     reply.header('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(att.file_name ?? 'file')}`)
