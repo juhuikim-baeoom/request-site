@@ -90,6 +90,7 @@ export type Database = {
       }
       request_attachments: {
         Row: {
+          comment_id: number | null
           created_at: string
           file_name: string | null
           file_size: number | null
@@ -100,6 +101,7 @@ export type Database = {
           uploaded_by: string | null
         }
         Insert: {
+          comment_id?: number | null
           created_at?: string
           file_name?: string | null
           file_size?: number | null
@@ -110,6 +112,7 @@ export type Database = {
           uploaded_by?: string | null
         }
         Update: {
+          comment_id?: number | null
           created_at?: string
           file_name?: string | null
           file_size?: number | null

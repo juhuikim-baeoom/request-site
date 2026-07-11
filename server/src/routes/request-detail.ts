@@ -133,9 +133,9 @@ export async function requestDetailRoutes(app: FastifyInstance) {
       const id = parseId(request.params.id)
       if (id === null) { reply.code(404).send({ error: 'not found' }); return }
 
-      // 요청 조회
+      // 요청 조회 (csat_rating 포함 — 재제출 방지에 필요)
       const reqRes = await db.execute<any>(sql`
-        select requester_id, status from requests where id = ${id}`)
+        select requester_id, status, csat_rating from requests where id = ${id}`)
       const req = reqRes.rows[0]
       if (!req) { reply.code(404).send({ error: 'not found' }); return }
 
@@ -144,6 +144,9 @@ export async function requestDetailRoutes(app: FastifyInstance) {
 
       // 완료 상태만 가능
       if (req.status !== '완료') { reply.code(400).send({ error: 'csat_only_for_completed' }); return }
+
+      // 재제출 방지: 이미 평가된 요청은 덮어쓰기 불가
+      if (req.csat_rating != null) { reply.code(409).send({ error: 'csat_already_submitted' }); return }
 
       const rating = request.body?.rating
       if (rating !== -1 && rating !== 1) {

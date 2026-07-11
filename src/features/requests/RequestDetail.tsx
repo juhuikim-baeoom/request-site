@@ -259,8 +259,10 @@ export function RequestDetail() {
   // 첨부 중 댓글과 연결되지 않은 것만 타임라인에 별도 표시
   if (attachments) {
     for (const a of attachments) {
-      const hasCommentId = (a as any).comment_id != null
-      if (!hasCommentId) {
+      if (a.comment_id == null) {
+        // 다운로드 허용 여부: 시스템팀·viewer 이상, 또는 업로더 본인
+        // (서버 /api/attachments/:id/download 와 동일 정책)
+        const canDownload = isSystemUser || a.uploaded_by === profile?.id
         timeline.push({
           kind: 'attachment',
           id: a.id,
@@ -269,7 +271,7 @@ export function RequestDetail() {
           isSystem: false,
           fileName: a.file_name,
           fileSize: a.file_size,
-          attachmentId: a.id,
+          attachmentId: canDownload ? a.id : undefined,
         })
       }
     }

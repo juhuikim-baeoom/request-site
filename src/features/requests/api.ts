@@ -147,8 +147,10 @@ export function useUploadCommentAttachment(requestId: number) {
   return useMutation({
     mutationFn: async (vars: { file: File; commentId: number }): Promise<RequestAttachment> => {
       const fd = new FormData()
-      fd.append('file', vars.file, vars.file.name)
+      // @fastify/multipart(v9): 텍스트 필드는 반드시 파일 파트보다 먼저 전송해야
+      // request.file() 이후 part.fields에 담긴다.
       fd.append('comment_id', String(vars.commentId))
+      fd.append('file', vars.file, vars.file.name)
       return apiUpload<RequestAttachment>(`/api/requests/${requestId}/attachments`, fd)
     },
     onSuccess: () => {
