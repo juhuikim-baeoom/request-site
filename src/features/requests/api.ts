@@ -3,6 +3,7 @@ import { supabase } from '../../lib/supabase'
 import type {
   RequestOrg,
   RequestPriority,
+  RequestStatus,
   RequestTypeCode,
   RequestType,
   RequestVisibility,
@@ -223,6 +224,50 @@ export function useCancelRequest(id: number) {
       void queryClient.invalidateQueries({ queryKey: ['requests', 'detail', id] })
       void queryClient.invalidateQueries({ queryKey: ['requests', 'view'] })
       void queryClient.invalidateQueries({ queryKey: ['requests', 'history', id] })
+    },
+  })
+}
+
+// ---------- 관리 보드 (시스템팀) ----------
+export interface BoardProfile {
+  id: string
+  name: string | null
+  email: string
+  role: 'staff' | 'system' | 'viewer'
+  org_affil: RequestOrg | null
+  dept_function: string | null
+}
+
+/** 전체 프로필 (담당자 후보·이름 매핑용). prof_read 완화로 로그인 사용자 조회 가능 */
+export function useAllProfiles() {
+  return useQuery({
+    queryKey: ['profiles', 'all'],
+    queryFn: async (): Promise<BoardProfile[]> => {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('id, name, email, role, org_affil, dept_function')
+        .order('name')
+      if (error) throw error
+      return (data ?? []) as BoardProfile[]
+    },
+    staleTime: 5 * 60_000,
+  })
+}
+
+/** 관리 보드용 상태/담당자 변경 (시스템팀). 상태 변경 시 이력·완료일은 트리거가 처리 */
+export function useBoardUpdate() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (vars: {
+      id: number
+      patch: { status?: RequestStatus; assignee_id?: string | null }
+    }) => {
+      const { error } = await supabase.from('requests').update(vars.patch).eq('id', vars.id)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      // ['requests'] 하위(view/detail/history) 전부 무효화
+      void queryClient.invalidateQueries({ queryKey: ['requests'] })
     },
   })
 }
