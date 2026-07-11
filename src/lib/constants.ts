@@ -26,18 +26,18 @@ export const STATUS_OPTIONS: RequestStatus[] = [
   '철회',
 ]
 
-// 상태별 뱃지 색상 (접수 등 활성 상태는 회색을 피해 한눈에 구분되게)
+// 상태별 뱃지 색상 (진한 배경 + 흰 글자로 한눈에 구분)
 export const STATUS_BADGE: Record<RequestStatus, string> = {
-  접수: 'bg-sky-100 text-sky-700',
-  확인: 'bg-blue-100 text-blue-700',
-  진행중: 'bg-indigo-100 text-indigo-700',
-  검수대기: 'bg-violet-100 text-violet-700',
-  재작업: 'bg-orange-100 text-orange-700',
-  완료: 'bg-green-100 text-green-700',
-  보류: 'bg-amber-100 text-amber-800',
-  반려: 'bg-red-100 text-red-700',
-  이관: 'bg-teal-100 text-teal-700',
-  철회: 'bg-gray-200 text-gray-400 line-through',
+  접수: 'bg-sky-500 text-white',
+  확인: 'bg-blue-600 text-white',
+  진행중: 'bg-indigo-600 text-white',
+  검수대기: 'bg-violet-600 text-white',
+  재작업: 'bg-orange-500 text-white',
+  완료: 'bg-green-600 text-white',
+  보류: 'bg-amber-500 text-white',
+  반려: 'bg-red-600 text-white',
+  이관: 'bg-teal-600 text-white',
+  철회: 'bg-gray-400 text-white line-through',
 }
 
 // 기한상태(request_view.due_status)별 뱃지 색상 — 초과·지연·임박 강조
