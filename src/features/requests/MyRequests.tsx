@@ -158,8 +158,9 @@ export function MyRequests() {
     const active = tab === t
     return (
       <button
+        role="tab"
         onClick={() => setTab(t)}
-        aria-pressed={active}
+        aria-selected={active}
         className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
           active ? 'bg-brand text-white' : 'text-gray-600 hover:bg-gray-100'
         }`}
@@ -293,9 +294,9 @@ export function MyRequests() {
                   key={r.id ?? r.seq}
                   className="border-b border-gray-100 last:border-0 hover:bg-gray-50"
                 >
-                  <td scope="row" className="whitespace-nowrap px-3 py-2 font-mono text-xs text-gray-500">
+                  <th scope="row" className="whitespace-nowrap px-3 py-2 font-mono text-xs text-gray-500 font-normal text-left">
                     {r.seq}
-                  </td>
+                  </th>
                   <td className="px-3 py-2">
                     <Link
                       to={`/requests/${r.id}`}
