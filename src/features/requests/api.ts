@@ -8,6 +8,9 @@ import type {
   RequestVisibility,
   RequestRow,
   RequestView,
+  RequestComment,
+  RequestStatusHistory,
+  RequestAttachment,
   RequestSharedTarget,
   DeptOption,
   SharedTargetType,
@@ -44,6 +47,143 @@ export function useVisibleSharedTargets() {
         map.set(t.request_id, list)
       }
       return map
+    },
+  })
+}
+
+// ---------- 요청 상세 ----------
+export interface PersonRef {
+  id: string
+  name: string | null
+  email: string
+  dept_function: string | null
+  org_affil: RequestOrg | null
+}
+
+export interface RequestDetailData {
+  view: RequestView
+  requester: PersonRef | null
+  assignee: PersonRef | null
+  sharedTargets: RequestSharedTarget[]
+}
+
+export function useRequestDetail(id: number) {
+  return useQuery({
+    queryKey: ['requests', 'detail', id],
+    enabled: Number.isFinite(id),
+    queryFn: async (): Promise<RequestDetailData> => {
+      const { data: view, error } = await supabase
+        .from('request_view')
+        .select('*')
+        .eq('id', id)
+        .single()
+      if (error) throw error
+      const v = view as RequestView
+
+      const ids = [v.requester_id, v.assignee_id].filter((x): x is string => !!x)
+      const byId = new Map<string, PersonRef>()
+      if (ids.length) {
+        const { data: profs } = await supabase
+          .from('profiles')
+          .select('id, name, email, dept_function, org_affil')
+          .in('id', ids)
+        for (const p of profs ?? []) byId.set(p.id, p as PersonRef)
+      }
+
+      const { data: shared } = await supabase
+        .from('request_shared_targets')
+        .select('*')
+        .eq('request_id', id)
+
+      return {
+        view: v,
+        requester: v.requester_id ? byId.get(v.requester_id) ?? null : null,
+        assignee: v.assignee_id ? byId.get(v.assignee_id) ?? null : null,
+        sharedTargets: shared ?? [],
+      }
+    },
+  })
+}
+
+export interface CommentWithAuthor extends RequestComment {
+  author: { name: string | null } | null
+}
+
+export function useRequestComments(id: number) {
+  return useQuery({
+    queryKey: ['requests', 'comments', id],
+    enabled: Number.isFinite(id),
+    queryFn: async (): Promise<CommentWithAuthor[]> => {
+      const { data, error } = await supabase
+        .from('request_comments')
+        .select('*, author:profiles(name)')
+        .eq('request_id', id)
+        .order('created_at', { ascending: true })
+      if (error) throw error
+      return (data ?? []) as unknown as CommentWithAuthor[]
+    },
+  })
+}
+
+export interface HistoryWithActor extends RequestStatusHistory {
+  actor: { name: string | null } | null
+}
+
+export function useRequestHistory(id: number) {
+  return useQuery({
+    queryKey: ['requests', 'history', id],
+    enabled: Number.isFinite(id),
+    queryFn: async (): Promise<HistoryWithActor[]> => {
+      const { data, error } = await supabase
+        .from('request_status_history')
+        .select('*, actor:profiles(name)')
+        .eq('request_id', id)
+        .order('changed_at', { ascending: true })
+      if (error) throw error
+      return (data ?? []) as unknown as HistoryWithActor[]
+    },
+  })
+}
+
+export function useRequestAttachments(id: number) {
+  return useQuery({
+    queryKey: ['requests', 'attachments', id],
+    enabled: Number.isFinite(id),
+    queryFn: async (): Promise<RequestAttachment[]> => {
+      const { data, error } = await supabase
+        .from('request_attachments')
+        .select('*')
+        .eq('request_id', id)
+        .order('created_at', { ascending: true })
+      if (error) throw error
+      return data ?? []
+    },
+  })
+}
+
+/** 첨부 다운로드용 서명 URL (비공개 버킷) */
+export async function getAttachmentUrl(path: string): Promise<string | null> {
+  const { data } = await supabase.storage.from(ATTACHMENT_BUCKET).createSignedUrl(path, 60)
+  return data?.signedUrl ?? null
+}
+
+export function useAddComment(requestId: number) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (body: string) => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+      if (!user) throw new Error('로그인이 필요합니다.')
+      const { error } = await supabase.from('request_comments').insert({
+        request_id: requestId,
+        author_id: user.id,
+        body: body.trim(),
+      })
+      if (error) throw error
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['requests', 'comments', requestId] })
     },
   })
 }

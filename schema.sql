@@ -332,9 +332,9 @@ alter table request_types          enable row level security;
 -- request_types: 로그인 사용자 모두 읽기
 create policy types_read on request_types for select to authenticated using (true);
 
--- profiles: 본인 + 시스템팀 전체 읽기
+-- profiles: 로그인 사용자 전체 읽기 (이름·부서·담당자 표시용). 수정은 시스템팀만.
 create policy prof_read on profiles for select to authenticated
-  using (id = auth.uid() or is_system());
+  using (true);
 -- 수정은 시스템팀만 (계정 관리 페이지). 본인 자가수정 불가.
 -- dept/org_affil을 바꿔도 과거 요청의 requester_dept/org 스냅샷이라 영향 없음(이후 요청부터 반영)
 create policy prof_update_admin on profiles for update to authenticated
