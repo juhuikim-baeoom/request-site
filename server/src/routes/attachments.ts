@@ -27,13 +27,27 @@ export async function attachmentRoutes(app: FastifyInstance) {
     const id = parseId(request.params.id)
     if (id === null) { reply.code(404).send({ error: 'not found' }); return }
     if (!(await canSee(u, id))) { reply.code(404).send({ error: 'not found' }); return }
+    // multipart: 파일 파트와 함께 comment_id 텍스트 필드 지원
+    // @fastify/multipart의 MultipartFile.fields에 같이 전송된 모든 필드가 담김
     const part = await request.file()
     if (!part) { reply.code(400).send({ error: 'no file' }); return }
     const buf = await part.toBuffer()
+
+    // comment_id 추출 (선택적 폼 필드)
+    let commentId: number | null = null
+    const rawCommentId = (part.fields as any)?.comment_id
+    if (rawCommentId !== undefined) {
+      const raw = String(
+        rawCommentId?.type === 'field' ? rawCommentId.value : rawCommentId ?? '',
+      ).trim()
+      const parsed = parseInt(raw, 10)
+      if (!isNaN(parsed) && parsed > 0) commentId = parsed
+    }
+
     const { path, size } = await saveUpload(id, part.filename, buf)
     const r = await db.execute<any>(sql`
-      insert into request_attachments (request_id, storage_path, file_name, file_size, mime_type, uploaded_by)
-      values (${id}, ${path}, ${part.filename}, ${size}, ${part.mimetype || null}, ${u.id})
+      insert into request_attachments (request_id, storage_path, file_name, file_size, mime_type, uploaded_by, comment_id)
+      values (${id}, ${path}, ${part.filename}, ${size}, ${part.mimetype || null}, ${u.id}, ${commentId})
       returning *`)
     reply.code(201); return r.rows[0]
   })

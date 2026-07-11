@@ -90,13 +90,14 @@ export async function requestDetailRoutes(app: FastifyInstance) {
       const wantsInternal = request.body?.is_internal === true
       const isInternal = wantsInternal && isSystem(u)
 
-      await withUser(u.id, (tx) =>
-        tx.execute(sql`
+      const inserted = await withUser(u.id, (tx) =>
+        tx.execute<any>(sql`
           insert into request_comments (request_id, author_id, body, is_internal)
           values (${id}, ${u.id}, ${body}, ${isInternal})
+          returning id
         `),
       )
-      reply.code(201); return { ok: true }
+      reply.code(201); return { id: inserted.rows[0].id }
     },
   )
 
