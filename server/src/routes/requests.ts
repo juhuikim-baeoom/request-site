@@ -37,13 +37,13 @@ export async function requestRoutes(app: FastifyInstance) {
     // enum 화이트리스트 검증 (잘못된 값이 DB까지 내려가 500 나는 것 방지)
     if (
       !isOneOf(ORGS, b.org) || !isOneOf(TYPE_CODES, b.type_code) ||
-      (b.priority !== undefined && !isOneOf(PRIORITIES, b.priority)) ||
+      (b.urgency !== undefined && !isOneOf(PRIORITIES, b.urgency)) ||
       (b.visibility !== undefined && !isOneOf(VISIBILITIES, b.visibility))
     ) { reply.code(400); return { error: 'invalid enum' } }
     const created = await withUser(u.id, async (tx) => {
       const ins = await tx.execute<any>(sql`
-        insert into requests (org, type_code, priority, visibility, title, body, desired_due, requester_id)
-        values (${b.org}, ${b.type_code}, ${b.priority ?? '보통'}, ${b.visibility ?? 'dept'},
+        insert into requests (org, type_code, urgency, visibility, title, body, desired_due, requester_id)
+        values (${b.org}, ${b.type_code}, ${b.urgency ?? '보통'}, ${b.visibility ?? 'dept'},
                 ${b.title.trim()}, ${b.body ?? null}, ${b.desired_due || null}, ${u.id})
         returning *`)
       const row = ins.rows[0]
@@ -67,7 +67,7 @@ export async function requestRoutes(app: FastifyInstance) {
     const b: any = request.body ?? {}
     // 수정 대상 enum 값 검증
     if (
-      (b.priority !== undefined && !isOneOf(PRIORITIES, b.priority)) ||
+      (b.urgency !== undefined && !isOneOf(PRIORITIES, b.urgency)) ||
       (b.visibility !== undefined && !isOneOf(VISIBILITIES, b.visibility)) ||
       (b.status !== undefined && !isOneOf(STATUSES, b.status))
     ) { reply.code(400); return { error: 'invalid enum' } }
@@ -84,11 +84,11 @@ export async function requestRoutes(app: FastifyInstance) {
     if (wantsBoard && !sys && !ownerCancel) { reply.code(403); return { error: 'forbidden' } }
 
     // 내용 수정 — 시스템팀 또는 (본인 且 접수)
-    const wantsEdit = ['title', 'body', 'priority', 'visibility', 'desired_due'].some((k) => b[k] !== undefined)
+    const wantsEdit = ['title', 'body', 'urgency', 'visibility', 'desired_due'].some((k) => b[k] !== undefined)
     if (wantsEdit && !sys && !(isOwner && row.status === '접수')) { reply.code(403); return { error: 'forbidden' } }
 
     const sets: any[] = []
-    for (const k of ['title', 'body', 'priority', 'visibility', 'desired_due', 'status', 'assignee_id']) {
+    for (const k of ['title', 'body', 'urgency', 'visibility', 'desired_due', 'status', 'assignee_id']) {
       if (b[k] !== undefined) sets.push(sql`${sql.raw(k)} = ${b[k]}`)
     }
     if (!sets.length) { reply.code(400); return { error: 'no fields' } }

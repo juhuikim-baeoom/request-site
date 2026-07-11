@@ -9,10 +9,10 @@ export function parseId(raw: string): number | null {
 // enum 화이트리스트 (잘못된 값이 DB까지 내려가 500 나는 것 방지 → 400)
 export const ORGS = ['배움', '배론', '허브', '공통'] as const
 export const TYPE_CODES = ['error', 'feature', 'data', 'file'] as const
-export const PRIORITIES = ['긴급', '보통', '낮음'] as const
+export const PRIORITIES = ['높음', '보통', '낮음'] as const
 export const VISIBILITIES = ['private', 'dept', 'function', 'org', 'shared'] as const
 export const STATUSES = [
-  '접수', '확인', '진행중', '검수대기', '재작업', '완료', '보류', '반려', '이관', '철회',
+  '접수', '진행중', '보류', '완료', '반려', '철회',
 ] as const
 
 export function isOneOf(list: readonly string[], v: unknown): boolean {
