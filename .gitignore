@@ -32,3 +32,11 @@ pnpm-debug.log*
 *.njsproj
 *.sln
 *.sw?
+
+# server
+server/node_modules
+server/uploads
+server/dist
+
+# bkit plugin runtime
+.bkit/
