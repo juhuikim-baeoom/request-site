@@ -66,10 +66,11 @@ export async function dashboardRoutes(app: FastifyInstance) {
               count(*) filter (where r.status = '완료')
             )::text
           end as rework_rate,
+          -- CSAT 긍정 비율: 5점 만점 중 4점 이상 = 긍정 (top-two-box)
           case
             when count(*) filter (where r.csat_rating is not null) = 0 then null
             else (
-              count(*) filter (where r.csat_rating = 1)::numeric /
+              count(*) filter (where r.csat_rating >= 4)::numeric /
               count(*) filter (where r.csat_rating is not null)
             )::text
           end as csat_positive_pct,

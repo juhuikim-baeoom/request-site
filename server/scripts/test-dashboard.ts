@@ -60,13 +60,13 @@ const [req3] = await db.insert(requests).values({
 }).returning()
 await db.execute(sql`update requests set created_at = ${fixOld} where id = ${req3.id}`)
 
-// req4: 완료 건, rework_count=1, csat=1(긍정), SLA 준수
+// req4: 완료 건, rework_count=1, csat=5(1-5점 척도, 4점 이상=긍정), SLA 준수
 // created_at을 5시간 전으로 UPDATE → firstResponseAt(2h전)·finalResolvedAt(1h전) 이 created_at 보다 뒤임
 const [req4] = await db.insert(requests).values({
   org: '배움', typeCode: 'error', title: '대시보드테스트-완료rework',
   requesterId: actorId, visibility: 'shared', status: '완료',
   reworkCount: 1,
-  csatRating: 1,
+  csatRating: 5,
   assigneeId: actorId, assignedAt: fixCreatedAt,
   firstResponseAt: fixResponseAt,
   responseDueAt: new Date(fixNow.getTime() + 60 * 60 * 1000),   // due=+1h → 응답은 created_at+3h이므로 준수
@@ -75,12 +75,12 @@ const [req4] = await db.insert(requests).values({
 }).returning()
 await db.execute(sql`update requests set created_at = ${fixCreatedAt} where id = ${req4.id}`)
 
-// req5: 완료 건, rework=0, csat=-1(부정)
+// req5: 완료 건, rework=0, csat=1(1-5점 척도의 최저점=부정)
 const [req5] = await db.insert(requests).values({
   org: '배론', typeCode: 'feature', title: '대시보드테스트-완료noRework',
   requesterId: actorId, visibility: 'shared', status: '완료',
   reworkCount: 0,
-  csatRating: -1,
+  csatRating: 1,
   assigneeId: actorId, assignedAt: fixCreatedAt,
   firstResponseAt: fixResponseAt,
   responseDueAt: new Date(fixNow.getTime() + 60 * 60 * 1000),
@@ -327,9 +327,61 @@ console.log('(14) dispute 기간 필터 검증 OK', JSON.stringify({
   disputeAcceptRate: disputeKpis.disputeAcceptRate,
 }))
 
+// ── 15. csat_positive_pct 검증 (1-5점 척도, 4점 이상=긍정) ──
+// 회귀 재현 목적: 구(舊) thumbs 모델에서는 csat_rating = 1이 👍(긍정)이었다.
+// 1-5점 척도로 전환된 지금 csat_rating = 1은 최저점(부정)이므로, 필터가 여전히
+// "= 1"이면 최악의 리뷰를 긍정으로 집계하는 정반대 결과가 나온다.
+// 다른 테스트/수동 조작으로 이미 존재하는 완료 건과 섞이지 않도록, dispute_rate 검증과
+// 동일한 방식으로 결정적 고정 과거 날짜를 창으로 쓰고, 그 창에 기존 평점 데이터가
+// 전혀 없음을 먼저 검증한 뒤에만 정확한 비율을 단언한다.
+const csatTitlePrefix = '대시보드테스트-CSAT'
+const csatWindowFrom = '2021-06-17' // dispute 창(2021-06-15)과 겹치지 않는 별도의 고정 과거 날짜
+const csatWindowTo = '2021-06-17'
+const csatWindowAnchor = new Date('2021-06-17T12:00:00Z')
+
+const csatAnchorPre = await db.execute<{ cnt: string }>(sql`
+  select count(*)::text as cnt from requests
+  where csat_rating is not null
+    and created_at >= ${csatWindowFrom}::timestamptz
+    and created_at < (${csatWindowTo}::date + interval '1 day')
+`)
+assert.equal(
+  csatAnchorPre.rows[0].cnt, '0',
+  `앵커 날짜(${csatWindowFrom})에 기존 csat 평점 데이터가 없어야 결정적 테스트가 성립한다, got ${csatAnchorPre.rows[0].cnt}`,
+)
+
+const csatReq5 = await makeCompletedRequest(`${csatTitlePrefix}-별점5`, csatWindowAnchor)
+const csatReq4 = await makeCompletedRequest(`${csatTitlePrefix}-별점4`, csatWindowAnchor)
+const csatReq2 = await makeCompletedRequest(`${csatTitlePrefix}-별점2`, csatWindowAnchor)
+const csatReq1 = await makeCompletedRequest(`${csatTitlePrefix}-별점1`, csatWindowAnchor)
+const csatReqIds = [csatReq5, csatReq4, csatReq2, csatReq1]
+
+// 별점 5,4 = 긍정(4점 이상) / 별점 2,1 = 부정 → 4건 중 2건 긍정 = 0.5
+await db.execute(sql`update requests set csat_rating = 5 where id = ${csatReq5}`)
+await db.execute(sql`update requests set csat_rating = 4 where id = ${csatReq4}`)
+await db.execute(sql`update requests set csat_rating = 2 where id = ${csatReq2}`)
+await db.execute(sql`update requests set csat_rating = 1 where id = ${csatReq1}`)
+
+const csatFiltered = await app.inject({
+  method: 'GET',
+  url: `/api/dashboard/metrics?from=${csatWindowFrom}&to=${csatWindowTo}`,
+  cookies: { sid: sysSid },
+})
+assert.equal(
+  csatFiltered.statusCode, 200,
+  `csat 기간 필터 200 기대, got ${csatFiltered.statusCode}: ${csatFiltered.body}`,
+)
+const csatKpis = csatFiltered.json().kpis
+assert.equal(
+  csatKpis.csatPositivePct, 0.5,
+  `csatPositivePct = 0.5 기대(4건 중 별점 5·4 두 건만 긍정), got ${csatKpis.csatPositivePct}`,
+)
+console.log('(15) csat_positive_pct 검증 OK', JSON.stringify({ csatPositivePct: csatKpis.csatPositivePct }))
+
 // ── 정리 ──
 await db.delete(requestDisputes).where(inArray(requestDisputes.id, disputeIds))
 await db.delete(requests).where(inArray(requests.id, disputeReqIds))
+await db.delete(requests).where(inArray(requests.id, csatReqIds))
 await db.delete(requests).where(inArray(requests.id, fixIds))
 await db.delete(sessions).where(eq(sessions.id, staffToken))
 await db.delete(users).where(eq(users.id, staffUser.id))
