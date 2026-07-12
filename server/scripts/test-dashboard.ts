@@ -206,6 +206,25 @@ const badDate = await app.inject({ method: 'GET', url: '/api/dashboard/metrics?f
 assert.equal(badDate.statusCode, 400)
 console.log('(12) 잘못된 날짜 400 OK')
 
+// ── 13. 검수·이의 지표 필드 검증 ──
+assert.ok('disputeRate' in kpis, 'disputeRate 필드 존재')
+assert.ok('disputeAcceptRate' in kpis, 'disputeAcceptRate 필드 존재')
+assert.ok('avgInspectionDays' in kpis, 'avgInspectionDays 필드 존재')
+assert.ok('openDisputeCount' in kpis, 'openDisputeCount 필드 존재')
+assert.equal(typeof kpis.openDisputeCount, 'number', 'openDisputeCount는 숫자')
+
+assert.ok(kpis.completionRoutes != null, 'completionRoutes 필드 존재')
+for (const route of ['REQUESTER', 'AUTO', 'SYSTEM_FORCED']) {
+  assert.equal(typeof kpis.completionRoutes[route], 'number', `completionRoutes.${route}는 숫자`)
+}
+console.log('(13) 검수·이의 지표 필드 OK', JSON.stringify({
+  disputeRate: kpis.disputeRate,
+  disputeAcceptRate: kpis.disputeAcceptRate,
+  avgInspectionDays: kpis.avgInspectionDays,
+  openDisputeCount: kpis.openDisputeCount,
+  completionRoutes: kpis.completionRoutes,
+}))
+
 // ── 정리 ──
 await db.delete(requests).where(inArray(requests.id, fixIds))
 await db.delete(sessions).where(eq(sessions.id, staffToken))
