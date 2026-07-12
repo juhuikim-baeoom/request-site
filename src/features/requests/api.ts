@@ -398,12 +398,23 @@ export interface CreateRequestInput {
   sharedTargets: SharedTargetInput[]
 }
 
-/** 요청 생성 → 접수번호 포함 행 반환. 첨부가 있으면 개별 업로드 */
+/** useCreateRequest 반환값 — 부분 업로드 실패 포함 */
+export interface CreateRequestResult {
+  id: number
+  seq: string | null
+  failedFiles: File[]
+}
+
+/**
+ * 요청 생성 → 첨부 순차 업로드.
+ * 요청 생성 후 파일 업로드 중 일부 실패해도 요청은 1건만(중복 생성 금지).
+ * failedFiles: 업로드 실패한 파일 목록. 빈 배열이면 전부 성공.
+ */
 export function useCreateRequest() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async (input: CreateRequestInput): Promise<RequestRow> => {
+    mutationFn: async (input: CreateRequestInput): Promise<CreateRequestResult> => {
       // 1) 요청 생성 (+ 공유대상). seq/스냅샷은 서버 트리거가 채움
       const request = await apiSend<RequestRow>('POST', '/api/requests', {
         org: input.org,
@@ -417,17 +428,48 @@ export function useCreateRequest() {
         sharedTargets: input.sharedTargets,
       })
 
-      // 2) 첨부 업로드 (각 파일 개별 multipart)
+      // 2) 첨부 순차 업로드 — 실패해도 요청 중복 생성 없이 failedFiles 수집
+      const failedFiles: File[] = []
       for (const file of input.files) {
-        const fd = new FormData()
-        fd.append('file', file, file.name)
-        await apiUpload(`/api/requests/${request.id}/attachments`, fd)
+        try {
+          const fd = new FormData()
+          fd.append('file', file, file.name)
+          await apiUpload(`/api/requests/${request.id}/attachments`, fd)
+        } catch {
+          failedFiles.push(file)
+        }
       }
 
-      return request
+      return { id: request.id, seq: request.seq ?? null, failedFiles }
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['requests'] })
+    },
+  })
+}
+
+/**
+ * 실패한 첨부파일만 기존 요청 id로 재업로드.
+ * 새 요청 생성 없이 POST /api/requests/:id/attachments 재시도.
+ */
+export function useRetryAttachments(requestId: number) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (files: File[]): Promise<{ failedFiles: File[] }> => {
+      const failedFiles: File[] = []
+      for (const file of files) {
+        try {
+          const fd = new FormData()
+          fd.append('file', file, file.name)
+          await apiUpload(`/api/requests/${requestId}/attachments`, fd)
+        } catch {
+          failedFiles.push(file)
+        }
+      }
+      return { failedFiles }
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['requests', 'attachments', requestId] })
     },
   })
 }

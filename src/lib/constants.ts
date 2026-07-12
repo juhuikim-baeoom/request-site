@@ -147,6 +147,14 @@ export const TYPE_FIELDS: Record<RequestTypeCode, IntakeField[]> = {
   ],
 }
 
+// 유형별 아이콘 (카드 UI용)
+export const TYPE_ICON: Record<RequestTypeCode, string> = {
+  error: '🐞',
+  feature: '✨',
+  data: '📊',
+  file: '📄',
+}
+
 // 유형별 상세내용 작성 안내문구 (요구사항 §2)
 export const TYPE_HINTS: Record<RequestTypeCode, string> = {
   error: '증상, 발생 화면 URL, 재현 방법을 함께 적어주세요.',
