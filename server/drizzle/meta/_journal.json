@@ -50,6 +50,13 @@
       "when": 1784000000001,
       "tag": "0006_inspection_and_disputes",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1784000000002,
+      "tag": "0007_completion_note",
+      "breakpoints": true
     }
   ]
 }

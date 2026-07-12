@@ -5,12 +5,19 @@
  * - 보류 왕복
  */
 import assert from 'node:assert/strict'
+import { randomBytes } from 'node:crypto'
 import { buildApp } from '../src/app.js'
 import { db, pool, withUser } from '../src/db/client.js'
-import { users, requests } from '../src/db/schema.js'
+import { users, requests, notifications } from '../src/db/schema.js'
 import { eq, sql } from 'drizzle-orm'
 import { loginAsDev } from '../src/routes/helpers.js'
 import { changeStatus, TransitionError } from '../src/services/transition.js'
+import { notify } from '../src/services/notify.js'
+
+/** 비동기(fire-and-forget) 알림 INSERT가 완료될 때까지 짧게 대기 */
+function tick(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 100))
+}
 
 const app = await buildApp()
 await loginAsDev(app)
@@ -26,6 +33,23 @@ async function makeRequest() {
   }).returning()
   return row
 }
+
+/** requesterId가 actorId와 다른 요청 생성 — 알림 발생 조건(requesterId !== actorId)을 만족시키기 위함 */
+async function makeRequestFor(requesterId: string) {
+  const [row] = await db.insert(requests).values({
+    org: '공통', typeCode: 'error', title: '전이테스트(알림)',
+    requesterId, visibility: 'dept',
+  }).returning()
+  return row
+}
+
+// 알림 테스트용 — actorId와 다른 요청자
+const [otherRequester] = await db.insert(users).values({
+  email: `transition-notif-${randomBytes(4).toString('hex')}@baeoom.com`,
+  name: '전이알림테스트요청자',
+  orgAffil: '공통',
+  role: 'staff',
+}).returning()
 
 // ──────────────────────────────────────────
 // (1) 접수 → 진행중 (허용)
@@ -214,6 +238,89 @@ async function makeRequest() {
   console.log('(10) completionRoute 누락 거부 OK')
   await db.delete(requests).where(eq(requests.id, req.id))
 }
+
+// ──────────────────────────────────────────
+// (11) SYSTEM_FORCED 강제 완료 — reason이 completion_note에 저장됨
+// ──────────────────────────────────────────
+{
+  const req = await makeRequest()
+  await changeStatus({ reqId: req.id, to: '진행중', actorId })
+  await changeStatus({ reqId: req.id, to: '검수대기', actorId })
+  await changeStatus({
+    reqId: req.id, to: '완료', actorId,
+    completionRoute: 'SYSTEM_FORCED', reason: '요청자와 구두 확인 완료',
+  })
+  const cur = await db.execute<any>(sql`select completion_note from requests where id = ${req.id}`)
+  assert.equal(cur.rows[0].completion_note, '요청자와 구두 확인 완료', 'completion_note에 강제 완료 사유가 저장되어야 함')
+  console.log('(11) SYSTEM_FORCED 강제 완료 사유 → completion_note 저장 OK')
+  await db.delete(requests).where(eq(requests.id, req.id))
+}
+
+// ──────────────────────────────────────────
+// (12) 접수 → 완료 (completionRoute 없음) — ILLEGAL_TRANSITION이 MISSING_COMPLETION_ROUTE보다 우선
+// ──────────────────────────────────────────
+{
+  const req = await makeRequest()
+  let code = ''
+  try {
+    await changeStatus({ reqId: req.id, to: '완료', actorId })
+  } catch (e: any) {
+    assert.ok(e instanceof TransitionError, 'TransitionError여야 함')
+    code = e.code
+  }
+  assert.equal(code, 'ILLEGAL_TRANSITION', '전이 자체가 불법이면 필드 누락보다 ILLEGAL_TRANSITION이 보고되어야 함')
+  console.log('(12) 접수 → 완료(completionRoute 없음) → ILLEGAL_TRANSITION 우선 OK')
+  await db.delete(requests).where(eq(requests.id, req.id))
+}
+
+// ──────────────────────────────────────────
+// (13) tx 경로 — changeStatus는 스스로 알림을 보내지 않고 호출자에게 미룬다
+// ──────────────────────────────────────────
+{
+  const req = await makeRequestFor(otherRequester.id)
+  await changeStatus({ reqId: req.id, to: '진행중', actorId })
+  await changeStatus({ reqId: req.id, to: '검수대기', actorId })
+  await changeStatus({ reqId: req.id, to: '완료', actorId, completionRoute: 'REQUESTER' })
+  // 위 세 전이는 tx 없이 호출됐으므로 각각 fire-and-forget notify()가 발생한다 — 정착될 때까지 대기
+  await tick()
+
+  const before = await db.execute<{ n: number }>(
+    sql`select count(*)::int as n from notifications where request_id = ${req.id}`,
+  )
+  const countBefore = before.rows[0].n
+
+  let pending: { userId: string; type: string; requestId: number; message: string } | undefined
+  await withUser(actorId, async (tx) => {
+    const result = await changeStatus({
+      reqId: req.id, to: '진행중', reason: '이의 수락', actorId, tx,
+    })
+    pending = result.notification
+    // 아직 커밋 전 — changeStatus가 스스로 알림을 보냈다면 여기서 이미 행이 늘어 있을 것
+    const mid = await tx.execute<{ n: number }>(
+      sql`select count(*)::int as n from notifications where request_id = ${req.id}`,
+    )
+    assert.equal(mid.rows[0].n, countBefore, 'tx 커밋 전에는 알림이 발송되지 않아야 함')
+  })
+
+  assert.ok(pending, 'tx 경로는 notification 정보를 반환해야 함')
+
+  const afterCommit = await db.execute<{ n: number }>(
+    sql`select count(*)::int as n from notifications where request_id = ${req.id}`,
+  )
+  assert.equal(afterCommit.rows[0].n, countBefore, '커밋 후에도 changeStatus 스스로는 알림을 보내지 않아야 함')
+
+  // 호출자가 커밋 후 직접 발송해야 하는 계약
+  await notify(pending!.userId, pending!.type as 'status', pending!.requestId, pending!.message)
+  const afterNotify = await db.execute<{ n: number }>(
+    sql`select count(*)::int as n from notifications where request_id = ${req.id}`,
+  )
+  assert.equal(afterNotify.rows[0].n, countBefore + 1, '호출자가 notify()를 호출하면 알림이 1건 늘어야 함')
+
+  console.log('(13) tx 경로 — changeStatus는 알림을 미루고 호출자가 발송 OK')
+  await db.delete(notifications).where(eq(notifications.requestId, req.id))
+  await db.delete(requests).where(eq(requests.id, req.id))
+}
+await db.delete(users).where(eq(users.id, otherRequester.id))
 
 await app.close()
 await pool.end()

@@ -110,6 +110,8 @@ export const requests = pgTable('requests', {
   holdReason: text('hold_reason'),
   rejectReason: text('reject_reason'),
   reworkReason: text('rework_reason'),
+  // 강제 완료(SYSTEM_FORCED 등) 시 남긴 사유 — 감사 추적/대시보드 지표용
+  completionNote: text('completion_note'),
   assignedAt: timestamp('assigned_at', { withTimezone: true }),
   responseDueAt: timestamp('response_due_at', { withTimezone: true }),
   resolutionDueAt: timestamp('resolution_due_at', { withTimezone: true }),
