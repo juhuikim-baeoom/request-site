@@ -4,6 +4,11 @@
 
 ## [Unreleased]
 
+### Changed
+- **진행중 → 접수 되돌리기(배정 취소) 허용** (`server/src/services/transition.ts`, `src/lib/constants.ts`): 허용 전이 매트릭스에 `진행중 → 접수`를 추가. 관리 보드에서 개별 드래그·리스트 인라인 select·벌크 상태 일괄변경 모두에서 진행중 건을 접수로 되돌릴 수 있다. 이전에는 매트릭스에 없어 서버가 `ILLEGAL_TRANSITION`으로 거부했다.
+  - 되돌릴 때 서버가 배정 정보를 초기화한다: `assignee_id`·`impact`·`priority_level`·`assigned_at`·`first_response_at`·`response_due_at`·`resolution_due_at`·`sla_policy_id` → null, `sla_response_breached` → false. 미배정 큐로 복귀하며 재배정이 가능하다(`assignRequest`는 `status='접수'`만 대상으로 삼음).
+  - 회귀 테스트 추가: `server/scripts/test-transition.ts` (6) 진행중 → 접수 되돌리기 + 배정 초기화.
+
 ### Added
 - **접수폼 2-페인 레이아웃 재설계** (`src/features/requests/RequestForm.tsx`, `src/features/requests/BodyEditorSlot.tsx`, `src/lib/constants.ts`)
   - 레이아웃: `grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_340px]` 셸 + `max-w-[1600px]` 상한. ≥lg 2-페인, <lg 단일 컬럼 + 모바일 하단 고정 제출바(`env(safe-area-inset-bottom)`).

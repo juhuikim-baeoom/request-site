@@ -53,7 +53,7 @@ export const WIP_LIMIT = 12
 // 허용 전이 매트릭스 (서버 API 계약 §PATCH /api/requests/:id 와 동일)
 export const ALLOWED_TRANSITIONS: Record<RequestStatus, RequestStatus[]> = {
   접수: ['진행중', '반려', '철회'],
-  진행중: ['완료', '보류', '반려'],
+  진행중: ['완료', '보류', '반려', '접수'], // 접수: 배정 취소(되돌리기) — 서버가 배정 정보를 초기화
   보류: ['진행중'],
   완료: ['진행중'], // 재작업
   반려: [],
