@@ -28,6 +28,9 @@ export async function dashboardRoutes(app: FastifyInstance) {
       // 기간 필터 조건 (created_at 기준)
       const fromCond = from ? sql`and r.created_at >= ${from}::timestamptz` : sql``
       const toCond = to ? sql`and r.created_at < (${to}::date + interval '1 day')` : sql``
+      // 이의(request_disputes) 서브쿼리용 — 이의가 걸린 요청(rq)의 created_at 기준으로 같은 창을 적용
+      const disputeFromCond = from ? sql`and rq.created_at >= ${from}::timestamptz` : sql``
+      const disputeToCond = to ? sql`and rq.created_at < (${to}::date + interval '1 day')` : sql``
 
       // ── KPIs ──
       const kpiRows = await db.execute<{
@@ -71,23 +74,28 @@ export async function dashboardRoutes(app: FastifyInstance) {
             )::text
           end as csat_positive_pct,
 
-          -- 이의제기율: 완료 건 대비 이의가 제기된 건의 비율
+          -- 이의제기율: 완료 건(창 내) 대비 이의가 제기된 건의 비율 — 분자는 분모의 부분집합이 되도록
+          -- r에 대한 filter로 표현한다 (요청 1건에 이의가 여러 건이어도 1건으로만 카운트)
           case
             when count(*) filter (where r.status = '완료') = 0 then null
             else (
-              select count(distinct d.request_id)::numeric
-              from request_disputes d
-            ) / count(*) filter (where r.status = '완료')
-          end::text as dispute_rate,
+              count(*) filter (where r.status = '완료'
+                and exists (select 1 from request_disputes d where d.request_id = r.id))::numeric
+              / count(*) filter (where r.status = '완료')
+            )::text
+          end as dispute_rate,
 
-          -- 이의 수락률: 심사가 끝난 이의 중 수락 비율
+          -- 이의 수락률: 심사가 끝난 이의 중 수락 비율 — 이의가 걸린 요청(rq)의 created_at을
+          -- 같은 기간 창으로 제한한다 (이의 row 자체는 r에 대한 filter로 표현할 수 없어 서브쿼리 유지)
           (
             select case
-              when count(*) filter (where status_cd in ('ACCEPTED','REJECTED')) = 0 then null
-              else count(*) filter (where status_cd = 'ACCEPTED')::numeric
-                   / count(*) filter (where status_cd in ('ACCEPTED','REJECTED'))
+              when count(*) filter (where d.status_cd in ('ACCEPTED','REJECTED')) = 0 then null
+              else count(*) filter (where d.status_cd = 'ACCEPTED')::numeric
+                   / count(*) filter (where d.status_cd in ('ACCEPTED','REJECTED'))
             end
-            from request_disputes
+            from request_disputes d
+            join requests rq on rq.id = d.request_id
+            where true ${disputeFromCond} ${disputeToCond}
           )::text as dispute_accept_rate,
 
           -- 평균 검수 소요일: 팀이 손 뗀 시점(first_resolved_at) → 최종 완료
