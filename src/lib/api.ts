@@ -24,11 +24,15 @@ export async function apiGet<T>(path: string): Promise<T> {
 }
 
 export async function apiSend<T>(method: string, path: string, body?: unknown): Promise<T> {
+  // 본문이 있을 때만 Content-Type: application/json 을 보낸다.
+  // (본문 없이 JSON 헤더만 보내면 Fastify가 FST_ERR_CTP_EMPTY_JSON_BODY 400으로 거부 →
+  //  dev-login·logout·알림 읽음 등 바디 없는 POST가 전부 실패한다.)
+  const hasBody = body !== undefined
   const res = await fetch(`${API_BASE}${path}`, {
     method,
     credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body),
+    headers: hasBody ? { 'Content-Type': 'application/json' } : undefined,
+    body: hasBody ? JSON.stringify(body) : undefined,
   })
   return parse<T>(res)
 }

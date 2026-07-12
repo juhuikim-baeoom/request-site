@@ -58,8 +58,12 @@ export function LoginPage() {
         {import.meta.env.DEV && (
           <button
             onClick={async () => {
-              await devLogin()
-              navigate('/', { replace: true })
+              try {
+                await devLogin()
+                navigate('/', { replace: true })
+              } catch (e) {
+                setAuthError(e instanceof Error ? e.message : '임시 로그인에 실패했습니다.')
+              }
             }}
             className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-4 py-2.5 text-sm font-medium text-amber-800 hover:bg-amber-100"
           >
