@@ -13,6 +13,7 @@ import type {
   RequestStatusHistory,
   RequestAttachment,
   RequestSharedTarget,
+  RequestDispute,
   DeptOption,
   SharedTargetType,
 } from '../../types/database'
@@ -430,4 +431,47 @@ export function useCreateRequest() {
       void queryClient.invalidateQueries({ queryKey: ['requests'] })
     },
   })
+}
+
+// ---------- 검수·이의제기 (Task 10·11 패널이 useMutation으로 감쌀 plain 함수들) ----------
+
+/** 검수 승인 — 요청자 본인, 검수대기 상태에서만 */
+export async function approveInspection(
+  id: number,
+  csat?: { rating: number; comment?: string },
+): Promise<{ ok: true }> {
+  return apiSend('PATCH', `/api/requests/${id}`, {
+    status: '완료' as RequestStatus,
+    ...(csat ? { csat_rating: csat.rating, csat_comment: csat.comment ?? null } : {}),
+  })
+}
+
+/** 재작업 요청 — 요청자 본인, 검수대기 상태에서만. 사유 필수 */
+export async function requestRework(id: number, reason: string): Promise<{ ok: true }> {
+  return apiSend('PATCH', `/api/requests/${id}`, { status: '진행중' as RequestStatus, reason })
+}
+
+/** 강제 완료 — 시스템팀, 검수대기 상태에서만. 사유 필수 */
+export async function forceComplete(id: number, reason: string): Promise<{ ok: true }> {
+  return apiSend('PATCH', `/api/requests/${id}`, { status: '완료' as RequestStatus, reason })
+}
+
+/** 요청의 이의제기 이력 조회 */
+export async function fetchDisputes(id: number): Promise<RequestDispute[]> {
+  const res = await apiGet<{ disputes: RequestDispute[] }>(`/api/requests/${id}/disputes`)
+  return res.disputes
+}
+
+/** 이의제기 — 요청자 본인, 완료 후 14일 이내 */
+export async function raiseDispute(id: number, reason: string): Promise<{ id: number }> {
+  return apiSend('POST', `/api/requests/${id}/disputes`, { reason })
+}
+
+/** 이의 심사 — 시스템팀. 사유 필수 */
+export async function reviewDispute(
+  disputeId: number,
+  decision: 'ACCEPTED' | 'REJECTED',
+  comment: string,
+): Promise<{ ok: true }> {
+  return apiSend('PATCH', `/api/disputes/${disputeId}`, { decision, comment })
 }

@@ -16,8 +16,23 @@ type Enums = Database['public']['Enums']
 export type UserRole = Enums['user_role']
 export type RequestOrg = Enums['request_org']
 
-// P1 확정 6종 상태 (서버 API 계약과 동일)
-export type RequestStatus = '접수' | '진행중' | '보류' | '완료' | '반려' | '철회'
+// P1 확정 7종 상태 (서버 API 계약과 동일) — 검수대기는 진행중↔완료 사이 검수 단계
+export type RequestStatus = '접수' | '진행중' | '검수대기' | '보류' | '완료' | '반려' | '철회'
+
+// 이의제기 상태 (request_disputes.status_cd)
+export type DisputeStatusCd = 'OPEN' | 'ACCEPTED' | 'REJECTED'
+
+// GET /api/requests/:id/disputes 응답 항목 — 서버가 이름을 조인해 내려준다
+export interface RequestDispute {
+  id: number
+  reason: string
+  status_cd: DisputeStatusCd
+  review_comment: string | null
+  reviewed_at: string | null
+  created_at: string
+  raised_by_name: string | null
+  reviewed_by_name: string | null
+}
 
 // P1 배정 시 서버가 산정하는 우선순위 레벨
 export type PriorityLevel = 'P1' | 'P2' | 'P3' | 'P4'

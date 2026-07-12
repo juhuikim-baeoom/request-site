@@ -310,6 +310,8 @@ export type Database = {
           assignee_id: string | null
           body: string | null
           completed_at: string | null
+          completion_note: string | null
+          completion_route: 'REQUESTER' | 'AUTO' | 'SYSTEM_FORCED' | null
           created_at: string
           desired_due: string | null
           final_resolved_at: string | null
@@ -317,6 +319,8 @@ export type Database = {
           first_resolved_at: string | null
           id: number
           impact: Database['public']['Enums']['urgency_level'] | null
+          inspection_due_at: string | null
+          inspection_reminder_sent_at: string | null
           intake_detail: Json | null
           is_locked: boolean
           org: Database['public']['Enums']['request_org']
@@ -348,6 +352,8 @@ export type Database = {
           assignee_id?: string | null
           body?: string | null
           completed_at?: string | null
+          completion_note?: string | null
+          completion_route?: 'REQUESTER' | 'AUTO' | 'SYSTEM_FORCED' | null
           created_at?: string
           desired_due?: string | null
           final_resolved_at?: string | null
@@ -355,6 +361,8 @@ export type Database = {
           first_resolved_at?: string | null
           id?: never
           impact?: Database['public']['Enums']['urgency_level'] | null
+          inspection_due_at?: string | null
+          inspection_reminder_sent_at?: string | null
           intake_detail?: Json | null
           is_locked?: boolean
           org: Database['public']['Enums']['request_org']
@@ -386,6 +394,8 @@ export type Database = {
           assignee_id?: string | null
           body?: string | null
           completed_at?: string | null
+          completion_note?: string | null
+          completion_route?: 'REQUESTER' | 'AUTO' | 'SYSTEM_FORCED' | null
           created_at?: string
           desired_due?: string | null
           final_resolved_at?: string | null
@@ -393,6 +403,8 @@ export type Database = {
           first_resolved_at?: string | null
           id?: never
           impact?: Database['public']['Enums']['urgency_level'] | null
+          inspection_due_at?: string | null
+          inspection_reminder_sent_at?: string | null
           intake_detail?: Json | null
           is_locked?: boolean
           org?: Database['public']['Enums']['request_org']
@@ -465,6 +477,7 @@ export type Database = {
           assignee_id: string | null
           body: string | null
           completed_at: string | null
+          completion_route: 'REQUESTER' | 'AUTO' | 'SYSTEM_FORCED' | null
           created_at: string | null
           csat_comment: string | null
           csat_rating: number | null
@@ -476,9 +489,11 @@ export type Database = {
           first_lead_days: number | null
           first_response_at: string | null
           first_resolved_at: string | null
+          has_open_dispute: boolean
           hold_reason: string | null
           id: number | null
           impact: Database['public']['Enums']['urgency_level'] | null
+          inspection_due_at: string | null
           intake_detail: Json | null
           is_locked: boolean | null
           org: Database['public']['Enums']['request_org'] | null
@@ -573,6 +588,7 @@ export type Database = {
       request_status:
         | '접수'
         | '진행중'
+        | '검수대기'
         | '보류'
         | '완료'
         | '반려'
