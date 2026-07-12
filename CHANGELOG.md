@@ -11,8 +11,17 @@
   - 에디터 슬롯: `BodyEditorSlot.tsx` 분리(잠정 textarea, plain text body). 향후 서상연 팀장 에디터 교체 대비 슬롯 props 계약 명문화.
   - 첨부 드롭존: 드래그드롭 + 숨김 input+label(키보드 선택) + drag-over 상태 + 파일 칩(제거 버튼). 파일당 20MB 클라이언트 사전검증(서버 제한과 일치).
   - 사이드바(속성·공유): 긴급도·희망완료일 2열 → 공개범위 → 공유대상(기본 접힘, 선택 수 뱃지, 접어도 선택 보존) → 제출.
-  - `useCreateRequest` 개선: 첨부 부분 업로드 실패 시 요청 중복 생성 없이 `{ id, seq, failedFiles }` 반환. 성공 화면에서 실패 파일만 기존 id로 재시도.
+  - `useCreateRequest` 개선: 첨부 부분 업로드 실패 시 요청 중복 생성 없이 `{ id, seq, failedFiles, totalFiles }` 반환. 성공 화면에서 실패 파일만 기존 id로 재시도. "N건 중 M건 실패" 메시지에 `totalFiles`(N) 사용.
   - 접근성: 제출 검증 실패 시 첫 오류 필드로 포커스+scrollIntoView 이동. 제출 중 버튼 disabled + 입력 잠금.
+
+### Fixed
+- **접수폼 접근성 — 모바일 제출바 AT 접근 불가** (`RequestForm.tsx`): 모바일 하단 고정 제출바 컨테이너 `aria-hidden="true"` 제거. 스크린리더에서 '접수하기' 버튼 접근 가능.
+- **접수폼 접근성 — 모바일 제출 버튼 form 연결 오류** (`RequestForm.tsx`): `<form id="request-form">` 추가, 버튼 `form="request-form-hidden"` → `form="request-form"` 수정. native form submission 정상화.
+- **접수폼 접근성 — 유형 카드 aria-invalid 미표시** (`RequestForm.tsx`): type_code 오류 시 모든 radio에 `aria-invalid` + `aria-describedby="error-type_code"` 추가.
+- **접수폼 접근성 — focusFirstError type_code 포커스 대상** (`RequestForm.tsx`): `fieldset`에 `id="fieldset-type_code" tabIndex={-1}` 추가. 오류 시 sr-only radio 대신 fieldset으로 포커스/스크롤해 시각 사용자도 이동 인지.
+- **접수폼 접근성 — share-panel aria-controls 참조 DOM 부재** (`RequestForm.tsx`): `{shareOpen && <div>}` 조건부 렌더 → `<div hidden={!shareOpen}>` 방식으로 변경. `aria-controls="share-panel"` 항상 유효한 DOM 참조 유지.
+- **접수폼 사이드바 2열 그리드 브레이크포인트** (`RequestForm.tsx`): `grid-cols-1 sm:grid-cols-2` → `grid-cols-[repeat(auto-fit,minmax(120px,1fr))]`. 뷰포트 기반 sm 대신 컨테이너 폭 기반 auto-fit으로 좁은 폭/확대 시 1열 fallback.
+- **접수폼 부분 실패 메시지 총 파일 수 누락** (`RequestForm.tsx`, `api.ts`): `CreateRequestResult`에 `totalFiles: number` 추가. "첨부 N건 중 M건 실패"에서 N = `totalFiles`(시도 총 건수), M = `failedFiles.length`(실패 건수)로 정확히 표시.
 
 - **P7 계정 관리 UI** (`src/features/accounts/Accounts.tsx`, `src/features/accounts/api.ts`)
   - `useUsers` 훅: `GET /api/users` 호출, 30s staleTime.

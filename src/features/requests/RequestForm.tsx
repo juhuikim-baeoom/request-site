@@ -41,35 +41,43 @@ function toggle(set: Set<string>, value: string): Set<string> {
 
 type FieldErrors = Record<string, string>
 
-// 첫 오류 필드 id 우선순위 (DOM 순서와 일치)
-const FIELD_ORDER = [
-  'field-type_code',
-  'field-title',
-  'field-urgency',
-  'field-desired_due',
-  'field-visibility',
+// 오류 키 → 실제 포커스 대상 id 매핑
+// type_code: sr-only radio(field-type_code) 대신 fieldset(fieldset-type_code)으로 이동해
+//            시각 사용자도 포커스 위치를 인지할 수 있게 함 (spec §5)
+function resolveErrorFocusId(errorKey: string): string {
+  if (errorKey === 'type_code') return 'fieldset-type_code'
+  return `field-${errorKey}`
+}
+
+// 첫 오류 필드 우선순위 (DOM 순서와 일치, 오류 키 기준)
+const FIELD_PRIORITY = [
+  'type_code',
+  'title',
+  'urgency',
+  'desired_due',
+  'visibility',
 ]
 
 function focusFirstError(errors: FieldErrors) {
-  // intake 필드 id 포함해 탐색
-  const intakeIds = Object.keys(errors)
-    .filter((k) => k.startsWith('intake_'))
-    .map((k) => `field-${k}`)
+  // intake 필드 키 수집 (type_code 바로 다음 우선순위)
+  const intakeKeys = Object.keys(errors).filter((k) => k.startsWith('intake_'))
 
-  const allIds = [FIELD_ORDER[0], ...intakeIds, ...FIELD_ORDER.slice(1)]
+  const priorityKeys = [FIELD_PRIORITY[0], ...intakeKeys, ...FIELD_PRIORITY.slice(1)]
 
-  for (const id of allIds) {
-    const el = document.getElementById(id)
-    if (el && errors[id.replace('field-', '')] !== undefined) {
-      el.focus()
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-      return
+  for (const key of priorityKeys) {
+    if (errors[key] !== undefined) {
+      const el = document.getElementById(resolveErrorFocusId(key))
+      if (el) {
+        el.focus()
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        return
+      }
     }
   }
 
   // fallback: 오류가 있는 첫 번째 요소
   for (const key of Object.keys(errors)) {
-    const el = document.getElementById(`field-${key}`)
+    const el = document.getElementById(resolveErrorFocusId(key))
     if (el) {
       el.focus()
       el.scrollIntoView({ behavior: 'smooth', block: 'center' })
@@ -313,6 +321,7 @@ export function RequestForm() {
 
       {/* 2-페인 그리드 */}
       <form
+        id="request-form"
         onSubmit={handleSubmit}
         className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_340px]"
         aria-label="요청 접수 폼"
@@ -321,7 +330,7 @@ export function RequestForm() {
         <section aria-label="요청 작성" className="min-w-0 space-y-6">
 
           {/* 유형: 카드형 네이티브 radio */}
-          <fieldset>
+          <fieldset id="fieldset-type_code" tabIndex={-1}>
             <legend className="mb-2 block text-sm font-medium text-gray-700">
               유형 <span className="text-red-500" aria-hidden="true">*</span>
             </legend>
@@ -339,6 +348,7 @@ export function RequestForm() {
                   const isSelected = typeCode === t.code
                   const icon = TYPE_ICON[t.code as RequestTypeCode] ?? '📋'
                   const hint = TYPE_HINTS[t.code as RequestTypeCode] ?? ''
+                  const hasTypeError = !!fieldErrors['type_code']
                   return (
                     <label
                       key={t.code}
@@ -359,7 +369,8 @@ export function RequestForm() {
                         onChange={() => handleTypeChange(t.code as RequestTypeCode)}
                         disabled={isPending}
                         className="sr-only"
-                        aria-describedby={fieldErrors['type_code'] ? 'error-type_code' : undefined}
+                        aria-invalid={hasTypeError || undefined}
+                        aria-describedby={hasTypeError ? 'error-type_code' : undefined}
                       />
                       <span className="text-lg" aria-hidden="true">{icon}</span>
                       <span className="mt-1 text-sm font-semibold text-gray-900">{t.label}</span>
@@ -567,8 +578,8 @@ export function RequestForm() {
           <div className="space-y-5 rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
             <p className="text-sm font-semibold text-gray-900">속성 · 공유</p>
 
-            {/* 긴급도 · 희망완료일 — 2열, 좁은 폭에서 1열 fallback */}
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {/* 긴급도 · 희망완료일 — 컨테이너 폭 기반 auto-fit: 120px 미만이면 1열로 fallback */}
+            <div className="grid gap-3 grid-cols-[repeat(auto-fit,minmax(120px,1fr))]">
               <div>
                 <label htmlFor="field-urgency" className={sidebarLabelCls}>
                   긴급도 <span className="text-red-500" aria-hidden="true">*</span>
@@ -683,9 +694,9 @@ export function RequestForm() {
                 </span>
               </button>
 
-              {shareOpen && (
-                <div
+              <div
                   id="share-panel"
+                  hidden={!shareOpen}
                   className="mt-2 space-y-3 rounded-lg bg-gray-50 p-3"
                 >
                   <p className="text-xs text-gray-500">
@@ -748,7 +759,6 @@ export function RequestForm() {
                     </div>
                   )}
                 </div>
-              )}
             </div>
 
             {/* 제출 버튼 (데스크톱 — lg 이상) */}
@@ -772,13 +782,13 @@ export function RequestForm() {
       <div
         className="fixed bottom-0 left-0 right-0 z-40 border-t border-gray-200 bg-white px-4 py-3 lg:hidden"
         style={{ paddingBottom: 'calc(0.75rem + env(safe-area-inset-bottom, 0px))' }}
-        aria-hidden="true"
       >
         <button
           type="submit"
-          form="request-form-hidden"
+          form="request-form"
           disabled={isPending}
           onClick={handleSubmit}
+          aria-label={isPending ? '접수 중' : '접수하기'}
           className="w-full rounded-lg bg-brand px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-dark disabled:opacity-60"
         >
           {isPending ? '접수 중…' : '접수하기'}
@@ -827,7 +837,7 @@ function CompletionCard({ result, onNewRequest }: CompletionCardProps) {
         {hasFailures && (
           <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
             <p className="font-semibold">
-              접수됨 · 첨부 {result.failedFiles.length}건 중{' '}
+              접수됨 · 첨부 {result.totalFiles}건 중{' '}
               {failedFiles.length}건 실패
             </p>
             <ul className="mt-1 list-inside list-disc text-xs text-amber-700">

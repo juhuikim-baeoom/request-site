@@ -403,6 +403,8 @@ export interface CreateRequestResult {
   id: number
   seq: string | null
   failedFiles: File[]
+  /** 업로드 시도한 총 파일 수 (부분 실패 메시지 "N건 중 M건 실패" 표시용) */
+  totalFiles: number
 }
 
 /**
@@ -440,7 +442,7 @@ export function useCreateRequest() {
         }
       }
 
-      return { id: request.id, seq: request.seq ?? null, failedFiles }
+      return { id: request.id, seq: request.seq ?? null, failedFiles, totalFiles: input.files.length }
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['requests'] })
