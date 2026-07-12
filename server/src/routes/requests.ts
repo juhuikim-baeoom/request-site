@@ -121,8 +121,8 @@ export async function requestRoutes(app: FastifyInstance) {
     if (id === null) { reply.code(404); return { error: 'not found' } }
     const b: any = request.body ?? {}
 
-    // completed_at 등 계산 필드는 클라이언트에서 무시
-    const BLOCKED_FIELDS = ['completed_at', 'first_resolved_at', 'final_resolved_at', 'rework_count', 'sla_resolution_breached']
+    // 트리거·서버가 소유하는 계산 필드는 클라이언트 입력을 무시한다
+    const BLOCKED_FIELDS = ['completed_at', 'first_resolved_at', 'final_resolved_at', 'rework_count', 'sla_resolution_breached', 'inspection_due_at', 'completion_route', 'completion_note']
     for (const f of BLOCKED_FIELDS) { delete b[f] }
 
     // 수정 대상 enum 값 검증 (status가 있으면 changeStatus에서 검증하므로 여기서는 기본 형식만)
