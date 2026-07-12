@@ -13,6 +13,7 @@ import { attachmentRoutes } from './routes/attachments.js'
 import { dashboardRoutes } from './routes/dashboard.js'
 import { userRoutes } from './routes/users.js'
 import { notificationRoutes } from './routes/notifications.js'
+import { disputeRoutes } from './routes/disputes.js'
 import './types.js'
 
 /** CSRF 방어: 변경 메서드에 대해 Origin 헤더가 허용 출처와 일치하는지 검증.
@@ -57,6 +58,7 @@ export async function buildApp(): Promise<FastifyInstance> {
   await app.register(dashboardRoutes)
   await app.register(userRoutes)
   await app.register(notificationRoutes)
+  await app.register(disputeRoutes)
 
   return app
 }
