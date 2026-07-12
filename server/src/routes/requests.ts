@@ -7,6 +7,7 @@ import { parseId, isOneOf, ORGS, TYPE_CODES, PRIORITIES, VISIBILITIES } from '..
 import { changeStatus, TransitionError } from '../services/transition.js'
 import { assignRequest, AssignError } from '../services/assign.js'
 import { urgencyResponseLevel, addBusinessMinutes, type Urgency, type Impact } from '../sla.js'
+import type { CompletionRoute } from '../services/inspection.js'
 
 // intake_detail 필수키 맵
 const INTAKE_REQUIRED: Record<string, string[]> = {
@@ -139,23 +140,64 @@ export async function requestRoutes(app: FastifyInstance) {
 
     // 상태 변경은 changeStatus()를 통해서만
     if (b.status !== undefined) {
-      // status 변경과 내용 편집을 한 번에 허용하지 않아 stale-status 우회 방지 (issues 2, 4, 5, 6)
+      // status 변경과 내용 편집을 한 번에 허용하지 않아 stale-status 우회 방지.
+      // 단 검수 승인(검수대기 → 완료)만은 CSAT를 함께 저장해야 하므로 예외로 둔다.
       const otherFields = ['title', 'body', 'urgency', 'visibility', 'desired_due', 'assignee_id']
       if (otherFields.some((k) => b[k] !== undefined)) {
         reply.code(400); return { error: 'status change and field edit must not be combined in one request' }
       }
 
-      const ownerCancel = isOwner && row.status === '접수' && b.status === '철회'
-      if (!sys && !ownerCancel) { reply.code(403); return { error: 'forbidden' } }
+      const isInspecting = row.status === '검수대기'
+      const ownerCancel   = isOwner && row.status === '접수' && b.status === '철회'
+      const ownerApprove  = isOwner && isInspecting && b.status === '완료'
+      const ownerRework   = isOwner && isInspecting && b.status === '진행중'
+      // isOwner 제외: 시스템팀 계정이 자기 자신의 요청을 검수 승인하는 경우는
+      // "강제완료"가 아니라 통상적인 요청자 승인(REQUESTER)으로 취급해야 사유 필수 규칙이
+      // 잘못 걸리지 않는다 (시드에 시스템팀 1명뿐이라 owner==system인 경우가 실재한다).
+      const systemForce   = sys && !isOwner && isInspecting && b.status === '완료'
+
+      if (!sys && !ownerCancel && !ownerApprove && !ownerRework) {
+        reply.code(403); return { error: 'forbidden' }
+      }
+
+      // 사유 필수: 검수 반려, 시스템팀 강제완료
+      if ((ownerRework || systemForce) && !b.reason) {
+        reply.code(400); return { error: 'reason required' }
+      }
+
+      // CSAT는 요청자 승인일 때만 허용한다
+      const hasCsat = b.csat_rating !== undefined || b.csat_comment !== undefined
+      if (hasCsat && !ownerApprove) {
+        reply.code(400); return { error: 'csat allowed only on requester approval' }
+      }
+      if (b.csat_rating !== undefined) {
+        const n = Number(b.csat_rating)
+        if (!Number.isInteger(n) || n < 1 || n > 5) {
+          reply.code(400); return { error: 'csat_rating must be an integer 1-5' }
+        }
+      }
+
+      let completionRoute: CompletionRoute | undefined
+      if (b.status === '완료') {
+        completionRoute = ownerApprove ? 'REQUESTER' : 'SYSTEM_FORCED'
+      }
 
       try {
-        await changeStatus({ reqId: id, to: b.status, reason: b.reason, actorId: u.id })
+        await changeStatus({ reqId: id, to: b.status, reason: b.reason, actorId: u.id, completionRoute })
       } catch (e: any) {
         if (e instanceof TransitionError) {
           if (e.code === 'NOT_FOUND') { reply.code(404); return { error: 'not found' } }
           reply.code(400); return { error: e.message, code: e.code }
         }
         throw e
+      }
+
+      // 승인 CSAT는 전이 성공 후 별도 UPDATE로 기록한다 (전이 실패 시 남지 않도록)
+      if (ownerApprove && hasCsat) {
+        await db.execute(sql`
+          update requests
+          set csat_rating = ${b.csat_rating ?? null}, csat_comment = ${b.csat_comment ?? null}
+          where id = ${id}`)
       }
 
       reply.code(200); return { ok: true }

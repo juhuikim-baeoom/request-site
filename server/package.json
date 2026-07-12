@@ -29,7 +29,8 @@
     "test:comment-attach": "tsx scripts/test-comment-attach.ts",
     "test:dashboard": "tsx scripts/test-dashboard.ts",
     "test:users": "tsx scripts/test-users.ts",
-    "test:notifications": "tsx scripts/test-notifications.ts"
+    "test:notifications": "tsx scripts/test-notifications.ts",
+    "test:inspection": "tsx scripts/test-inspection.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^10.0.1",
