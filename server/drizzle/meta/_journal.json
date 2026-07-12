@@ -43,6 +43,13 @@
       "when": 1784000000000,
       "tag": "0005_add_inspection_enums",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1784000000001,
+      "tag": "0006_inspection_and_disputes",
+      "breakpoints": true
     }
   ]
 }
