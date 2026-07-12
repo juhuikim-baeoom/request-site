@@ -218,7 +218,7 @@ export function RequestForm() {
   }
 
   return (
-    <section className="mx-auto max-w-2xl">
+    <section aria-label="요청 접수">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold text-gray-900">요청 접수</h1>
         <span className="text-xs text-gray-500">

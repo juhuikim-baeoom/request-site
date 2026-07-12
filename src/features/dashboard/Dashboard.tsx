@@ -181,7 +181,7 @@ export function Dashboard() {
   const yearOptions = Array.from({ length: 4 }, (_, i) => String(currentYear - 3 + i))
 
   return (
-    <div className="mx-auto max-w-screen-xl px-4 py-6">
+    <div className="w-full">
       <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
         <h1 className="text-xl font-bold text-gray-900">통계 대시보드</h1>
 
