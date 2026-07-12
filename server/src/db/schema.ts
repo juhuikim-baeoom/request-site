@@ -93,6 +93,7 @@ export const requests = pgTable('requests', {
   completedAt: timestamp('completed_at', { withTimezone: true }),
   reworkCount: integer('rework_count').notNull().default(0),
   inspectionDueAt: timestamp('inspection_due_at', { withTimezone: true }),
+  inspectionReminderSentAt: timestamp('inspection_reminder_sent_at', { withTimezone: true }),
   completionRoute: varchar('completion_route', { length: 16 }),
   parentRequestId: bigint('parent_request_id', { mode: 'number' })
     .references((): AnyPgColumn => requests.id),

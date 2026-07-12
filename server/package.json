@@ -31,7 +31,8 @@
     "test:users": "tsx scripts/test-users.ts",
     "test:notifications": "tsx scripts/test-notifications.ts",
     "test:inspection": "tsx scripts/test-inspection.ts",
-    "test:disputes": "tsx scripts/test-disputes.ts"
+    "test:disputes": "tsx scripts/test-disputes.ts",
+    "test:auto-complete": "tsx scripts/test-auto-complete.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^10.0.1",
