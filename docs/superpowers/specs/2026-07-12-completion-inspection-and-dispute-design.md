@@ -129,9 +129,20 @@ CLAUDE.md §2의 신규 테이블 규칙을 따랐다. 예약어 `status` 대신
 
 기각(`REJECTED`)된 이의도 행으로 남는다. "요청자가 불만을 제기했으나 범위 밖이었다"는 사실이 집계돼야 구현 품질 문제인지 요건 정의 문제인지 구분할 수 있다.
 
-### RLS
+### 권한
 
-`request_disputes`는 해당 `request_id`에 대한 읽기 권한이 있는 사용자만 조회할 수 있다. 생성은 요청자 본인, 심사(`update`)는 시스템팀으로 제한한다.
+이 프로젝트는 Supabase에서 자체 Postgres로 이전하면서 RLS를 쓰지 않는다. 권한은 앱 계층(`server/src/authz.ts`)에서 강제하며, `withUser`가 세팅하는 `app.user_id`는 RLS가 아니라 `on_status_change` 트리거의 변경자 기록용이다. 따라서 `request_disputes`에도 RLS 정책을 만들지 않고 라우트에서 검사한다.
+
+- 조회: 해당 요청을 볼 수 있는 사용자(`canSeeRequest`)만 이의 이력을 본다.
+- 생성: 요청자 본인만 (`requests.requester_id = currentUser.id`).
+- 심사: 시스템팀만 (`isSystem`).
+
+### 마이그레이션 분할
+
+Postgres 16에서 `ALTER TYPE ... ADD VALUE`로 추가한 enum 값은 **같은 트랜잭션 안에서 사용할 수 없다**(`unsafe use of new value of enum type`). drizzle 마이그레이터는 마이그레이션 파일 하나를 한 트랜잭션으로 실행하므로, 다음과 같이 두 파일로 나눈다.
+
+- `0005`: `request_status`에 `검수대기`, `notification_type`에 `dispute` 추가. 이것만.
+- `0006`: 새 값을 참조하는 나머지 전부 (컬럼·테이블·트리거·뷰).
 
 ## 6. API
 
@@ -202,14 +213,19 @@ CLAUDE.md §2의 신규 테이블 규칙을 따랐다. 예약어 `status` 대신
 
 ## 9. 변경 범위
 
-### 마이그레이션 (`server/drizzle/0005_*.sql`)
+### 마이그레이션
 
-- `request_status` enum에 `검수대기` 추가
+`0005_add_inspection_enums.sql` — enum 값만 추가한다.
+
+- `request_status`에 `검수대기`
+- `notification_type`에 `dispute`
+
+`0006_inspection_and_disputes.sql` — 새 enum 값을 참조하는 나머지 전부.
+
 - `requests`에 `inspection_due_at timestamptz`, `completion_route varchar(16)` 추가
-- `request_disputes` 테이블 및 부분 유니크 인덱스 생성, RLS 정책 추가
-- `notifications.type`에 `dispute` 추가
+- `request_disputes` 테이블 및 부분 유니크 인덱스 생성
 - `on_status_change` 트리거 교체 (§4)
-- `request_view`에 `has_open_dispute` 추가
+- `request_view` 교체: `has_open_dispute` 추가, `due_status`의 종결 상태 목록에 `검수대기` 포함 (팀이 손을 뗀 뒤 요청자가 검수를 늦게 해서 기한초과로 표시되면 안 된다)
 
 forward-only이며 기존 마이그레이션 파일은 편집하지 않는다. drizzle journal 등록을 잊지 않는다(`0004`에서 누락된 전례가 있다).
 
