@@ -280,7 +280,7 @@ export function RequestDetail() {
   timeline.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0))
 
   return (
-    <section className="mx-auto max-w-3xl space-y-6 pb-12">
+    <section className="space-y-6 pb-12">
       <Link to="/requests/mine" className="text-sm text-gray-500 hover:text-brand">
         ← 내 요청 목록
       </Link>

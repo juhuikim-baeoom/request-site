@@ -825,7 +825,7 @@ function CompletionCard({ result, onNewRequest }: CompletionCardProps) {
   }
 
   return (
-    <section className="mx-auto max-w-lg">
+    <section>
       <div className="rounded-xl border border-green-200 bg-green-50 p-6 text-center">
         <h1 className="text-lg font-bold text-green-800">접수가 완료되었습니다</h1>
         <p className="mt-2 text-sm text-green-700">
