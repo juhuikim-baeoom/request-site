@@ -1,6 +1,6 @@
 import { sql } from 'drizzle-orm'
 import type { FastifyInstance } from 'fastify'
-import { db } from '../db/client.js'
+import { db, withUser } from '../db/client.js'
 import { notify } from '../services/notify.js'
 import { changeStatus, TransitionError } from '../services/transition.js'
 import { INSPECTION_DAYS, INSPECTION_REMINDER_DAYS } from '../services/inspection.js'
@@ -34,7 +34,10 @@ export async function runAutoComplete(): Promise<{ completed: number; reminded: 
   let completed = 0
   for (const row of expired.rows) {
     try {
-      await changeStatus({ reqId: row.id, to: '완료', actorId, completionRoute: 'AUTO' })
+      // tx를 넘겨 changeStatus가 자체 알림("상태가 완료로 변경되었습니다")을 보내지 않게 한다 —
+      // 그 알림은 버리고, 트랜잭션 커밋 후 아래에서 배치 전용 메시지만 보낸다.
+      // (반환되는 notification 필드는 의도적으로 무시한다)
+      await withUser(actorId, (tx) => changeStatus({ reqId: row.id, to: '완료', actorId, completionRoute: 'AUTO', tx }))
       completed++
       if (row.requester_id) {
         const seq = row.seq ?? String(row.id)

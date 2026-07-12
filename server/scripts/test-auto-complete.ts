@@ -19,6 +19,11 @@ await loginAsDev(app)
 const juhui = await db.query.users.findFirst({ where: eq(users.email, 'juhuikim@baeoom.com') })
 const actorId = juhui!.id
 
+/** 비동기(fire-and-forget) 알림 INSERT가 완료될 때까지 짧게 대기 */
+function tick(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 100))
+}
+
 /**
  * 테스트용 일반 직원 계정.
  * 시드에는 시스템팀(juhui) 1명뿐인데, 배치가 요청자에게 알림을 보내는지 보려면
@@ -59,6 +64,13 @@ async function cleanup(reqId: number) {
   await db.execute(sql`
     update requests set inspection_due_at = now() - interval '1 hour' where id = ${req.id}`)
 
+  // makeInspecting() 자체가 (진행중, 검수대기) 전이로 알림 2건을 미리 만들어두므로,
+  // 자동완료가 "추가로" 몇 건을 보내는지 보려면 배치 실행 전 개수를 기준선으로 잡아야 한다.
+  await tick()
+  const before = await db.execute<any>(sql`
+    select count(*)::int as c from notifications where request_id = ${req.id} and user_id = ${requesterId}`)
+  const baseline = before.rows[0].c
+
   const result = await runAutoComplete()
   assert.ok(result.completed >= 1, `최소 1건은 자동완료돼야 함 (실제 ${result.completed})`)
 
@@ -68,7 +80,18 @@ async function cleanup(reqId: number) {
   assert.equal(r.status, '완료')
   assert.equal(r.completion_route, 'AUTO')
   assert.ok(r.completed_at !== null)
-  console.log('(1) 기한 만료 → AUTO 완료 OK')
+
+  // changeStatus가 tx 경로에서 자체 발송하는 일반 알림("상태가 완료로 변경되었습니다")과
+  // 배치가 보내는 전용 알림("자동 완료되었습니다")이 중복 발송되지 않는지 확인 —
+  // 이번 자동완료 1건에 대해 요청자는 정확히 알림 1개만 새로 받아야 한다.
+  await tick()
+  const after = await db.execute<any>(sql`
+    select message from notifications where request_id = ${req.id} and user_id = ${requesterId} order by created_at`)
+  const newNotifs = after.rows.slice(baseline)
+  assert.equal(newNotifs.length, 1, `자동완료로 새로 생긴 알림은 1건만 가야 함 (실제 ${newNotifs.length}건: ${JSON.stringify(newNotifs.map((n: any) => n.message))})`)
+  assert.match(newNotifs[0].message, /자동 완료/, '배치 전용 메시지만 남아야 함')
+
+  console.log('(1) 기한 만료 → AUTO 완료 OK (신규 알림 1건)')
   await cleanup(req.id)
 }
 
