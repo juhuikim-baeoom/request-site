@@ -110,10 +110,10 @@ export async function changeStatus({
     const sets: ReturnType<typeof sql>[] = [sql`status = ${to}`]
     if (to === '완료') {
       sets.push(sql`completion_route = ${completionRoute!}`)
-      if (reason != null) {
-        // 강제 완료(SYSTEM_FORCED) 등 완료 사유의 유일한 기록처 — 감사 추적/대시보드 지표용
-        sets.push(sql`completion_note = ${reason}`)
-      }
+      // 강제 완료(SYSTEM_FORCED) 등 완료 사유의 유일한 기록처 — 감사 추적/대시보드 지표용.
+      // 무조건 덮어써야 한다: reason이 없으면 null로 지워, 재작업 후 재완료 시
+      // 이전 완료(예: SYSTEM_FORCED 강제완료 사유)의 흔적이 남아 감사 기록을 오염시키지 않게 한다.
+      sets.push(sql`completion_note = ${reason ?? null}`)
     }
     if (to === '보류' && reason != null) {
       sets.push(sql`hold_reason = ${reason}`)

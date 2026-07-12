@@ -288,6 +288,10 @@ const [otherRequester] = await db.insert(users).values({
     sql`select count(*)::int as n from notifications where request_id = ${req.id}`,
   )
   const countBefore = before.rows[0].n
+  // 위 3건(진행중/검수대기/완료)의 비-tx 전이는 requesterId !== actorId이므로 각각 자동 발송된다 —
+  // 이 값이 흔들리면(예: 리뷰어가 non-tx 경로의 notify() 호출을 삭제) 아래 카운트 비교만으로는
+  // "0건과 0건이 같다"는 식으로 통과해버릴 수 있으므로 기대값을 명시적으로 고정한다.
+  assert.equal(countBefore, 3, '비-tx 전이 3건은 각각 알림을 자동 발송해야 함')
 
   let pending: { userId: string; type: string; requestId: number; message: string } | undefined
   await withUser(actorId, async (tx) => {
@@ -321,6 +325,35 @@ const [otherRequester] = await db.insert(users).values({
   await db.delete(requests).where(eq(requests.id, req.id))
 }
 await db.delete(users).where(eq(users.id, otherRequester.id))
+
+// ──────────────────────────────────────────
+// (14) SYSTEM_FORCED 강제 완료 사유가 재작업 후 재완료 시 지워져야 함
+// (completion_note는 강제완료 감사 추적 컬럼 — 새 completionRoute로 재완료되면서
+//  reason을 주지 않으면, 이전 강제완료 사유가 남아있으면 감사 기록이 오염된다)
+// ──────────────────────────────────────────
+{
+  const req = await makeRequest()
+  await changeStatus({ reqId: req.id, to: '진행중', actorId })
+  await changeStatus({ reqId: req.id, to: '검수대기', actorId })
+  await changeStatus({
+    reqId: req.id, to: '완료', actorId,
+    completionRoute: 'SYSTEM_FORCED', reason: '요청자와 구두 확인 완료',
+  })
+  const forced = await db.execute<any>(sql`select completion_note, completion_route from requests where id = ${req.id}`)
+  assert.equal(forced.rows[0].completion_note, '요청자와 구두 확인 완료', '강제 완료 사유가 저장되어야 함')
+  assert.equal(forced.rows[0].completion_route, 'SYSTEM_FORCED')
+
+  // 이의 수락 등으로 재작업 → 검수대기 → 다시 완료 (이번엔 REQUESTER, reason 없음)
+  await changeStatus({ reqId: req.id, to: '진행중', reason: '이의 수락', actorId })
+  await changeStatus({ reqId: req.id, to: '검수대기', actorId })
+  await changeStatus({ reqId: req.id, to: '완료', actorId, completionRoute: 'REQUESTER' })
+
+  const recompleted = await db.execute<any>(sql`select completion_note, completion_route from requests where id = ${req.id}`)
+  assert.equal(recompleted.rows[0].completion_route, 'REQUESTER', 'completion_route가 REQUESTER로 갱신되어야 함')
+  assert.equal(recompleted.rows[0].completion_note, null, '이전 강제 완료 사유가 새 완료에서는 지워져야 함')
+  console.log('(14) 재작업 후 재완료 시 이전 completion_note가 지워짐 OK')
+  await db.delete(requests).where(eq(requests.id, req.id))
+}
 
 await app.close()
 await pool.end()
