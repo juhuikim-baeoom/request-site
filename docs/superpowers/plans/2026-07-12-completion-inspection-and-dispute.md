@@ -696,6 +696,20 @@ const cookie = await loginAsDev(app)
 const juhui = await db.query.users.findFirst({ where: eq(users.email, 'juhuikim@baeoom.com') })
 const actorId = juhui!.id
 
+/**
+ * 테스트용 일반 직원 계정.
+ * 시드에는 시스템팀(juhui) 1명뿐이므로, "요청자 ≠ 시스템팀" 시나리오를 만들려면 직접 만들어야 한다.
+ */
+async function ensureStaffUser(): Promise<string> {
+  const email = 'test-staff@baeoom.com'
+  const existing = await db.query.users.findFirst({ where: eq(users.email, email) })
+  if (existing) return existing.id
+  const [row] = await db.insert(users).values({
+    email, name: '테스트직원', role: 'staff', orgAffil: '공통', deptFunction: '교학팀',
+  }).returning()
+  return row.id
+}
+
 /** 검수대기 상태의 요청을 만든다. requesterId 기본값은 로그인 사용자 본인. */
 async function makeInspecting(requesterId: string = actorId) {
   const [row] = await db.insert(requests).values({
@@ -767,8 +781,8 @@ async function makeInspecting(requesterId: string = actorId) {
 // ──────────────────────────────────────────
 {
   // 남의 요청으로 만들어 owner 경로를 배제한다 (dev-login 사용자는 system 역할)
-  const other = await db.query.users.findFirst({ where: sql`email <> ${'juhuikim@baeoom.com'}` })
-  const req = await makeInspecting(other!.id)
+  const otherId = await ensureStaffUser()
+  const req = await makeInspecting(otherId)
   const res = await app.inject({
     method: 'PATCH', url: `/api/requests/${req.id}`, cookies: { session: cookie },
     payload: { status: '완료' },
@@ -1508,9 +1522,22 @@ await loginAsDev(app)
 const juhui = await db.query.users.findFirst({ where: eq(users.email, 'juhuikim@baeoom.com') })
 const actorId = juhui!.id
 
-// 배치가 요청자에게 알림을 보내는지 보려면 요청자가 배치 액터와 달라야 한다
-const other = await db.query.users.findFirst({ where: sql`email <> ${'juhuikim@baeoom.com'}` })
-const requesterId = other!.id
+/**
+ * 테스트용 일반 직원 계정.
+ * 시드에는 시스템팀(juhui) 1명뿐인데, 배치가 요청자에게 알림을 보내는지 보려면
+ * 요청자가 배치 액터(시스템팀)와 달라야 한다.
+ */
+async function ensureStaffUser(): Promise<string> {
+  const email = 'test-staff@baeoom.com'
+  const existing = await db.query.users.findFirst({ where: eq(users.email, email) })
+  if (existing) return existing.id
+  const [row] = await db.insert(users).values({
+    email, name: '테스트직원', role: 'staff', orgAffil: '공통', deptFunction: '교학팀',
+  }).returning()
+  return row.id
+}
+
+const requesterId = await ensureStaffUser()
 
 async function makeInspecting() {
   const [row] = await db.insert(requests).values({
