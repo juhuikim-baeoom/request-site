@@ -1,13 +1,13 @@
 import {
-  pgEnum, pgTable, uuid, text, integer, bigint, boolean, timestamp, date, index, unique,
-  uniqueIndex, smallint, jsonb, type AnyPgColumn,
+  pgEnum, pgTable, uuid, text, integer, bigint, bigserial, boolean, timestamp, date, index, unique,
+  uniqueIndex, smallint, jsonb, varchar, type AnyPgColumn,
 } from 'drizzle-orm/pg-core'
 import { sql } from 'drizzle-orm'
 
 export const userRole = pgEnum('user_role', ['staff', 'system', 'viewer'])
 export const requestOrg = pgEnum('request_org', ['배움', '배론', '허브', '공통'])
 export const requestStatus = pgEnum('request_status', [
-  '접수', '진행중', '보류', '완료', '반려', '철회',
+  '접수', '진행중', '검수대기', '보류', '완료', '반려', '철회',
 ])
 export const urgencyLevel = pgEnum('urgency_level', ['높음', '보통', '낮음'])
 export const priorityLevel = pgEnum('priority_level', ['P1', 'P2', 'P3', 'P4'])
@@ -15,7 +15,7 @@ export const requestSource = pgEnum('request_source', ['web', 'email'])
 export const requestVisibility = pgEnum('request_visibility', [
   'private', 'dept', 'function', 'org', 'shared',
 ])
-export const notificationType = pgEnum('notification_type', ['assigned', 'status', 'comment'])
+export const notificationType = pgEnum('notification_type', ['assigned', 'status', 'comment', 'dispute'])
 
 // auth.users + profiles 통합
 export const users = pgTable('users', {
@@ -92,6 +92,8 @@ export const requests = pgTable('requests', {
   desiredDue: date('desired_due'),
   completedAt: timestamp('completed_at', { withTimezone: true }),
   reworkCount: integer('rework_count').notNull().default(0),
+  inspectionDueAt: timestamp('inspection_due_at', { withTimezone: true }),
+  completionRoute: varchar('completion_route', { length: 16 }),
   parentRequestId: bigint('parent_request_id', { mode: 'number' })
     .references((): AnyPgColumn => requests.id),
   sourceThreadId: text('source_thread_id'),
@@ -187,4 +189,20 @@ export const requestSharedTargets = pgTable('request_shared_targets', {
 }, (t) => ({
   uniq: unique('uq_shared_target').on(t.requestId, t.targetType, t.targetValue),
   requestIdx: index('idx_shared_targets_request').on(t.requestId),
+}))
+
+// 이의제기(검수대기 완료 결과에 대한 반론) — request당 OPEN 상태는 최대 1건(DB UNIQUE 부분 인덱스로 보장)
+export const requestDisputes = pgTable('request_disputes', {
+  id: bigserial('id', { mode: 'number' }).primaryKey(),
+  requestId: bigint('request_id', { mode: 'number' }).notNull().references(() => requests.id, { onDelete: 'cascade' }),
+  raisedBy: uuid('raised_by').notNull().references(() => users.id),
+  reason: text('reason').notNull(),
+  statusCd: varchar('status_cd', { length: 16 }).notNull().default('OPEN'),
+  reviewedBy: uuid('reviewed_by').references(() => users.id),
+  reviewComment: text('review_comment'),
+  reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  requestIdx: index('idx_request_disputes_request').on(t.requestId),
 }))
