@@ -3,6 +3,8 @@ import { useUsers, useUpdateUser, useImportOrgDirectory } from './api'
 import type { UserRow, UpdateUserInput, OrgDirectoryRow } from './api'
 import type { UserRole, RequestOrg } from '../../types/database'
 import { ORG_OPTIONS, ROLE_LABEL, ASSIGNABLE_ROLES } from '../../lib/constants'
+import { useAuth } from '../../auth/useAuth'
+import { canManageAccounts } from '../../lib/permissions'
 
 const ORG_LABEL: Record<RequestOrg, string> = {
   배움: '배움',
@@ -246,7 +248,8 @@ function CsvImportPanel() {
       </h2>
       <p className="mb-3 text-xs text-gray-500">
         헤더: <code className="rounded bg-gray-100 px-1">email,name,dept,org_affil,dept_function,role</code>
-        &nbsp;(dept_function·role 은 선택). org_affil: 배움/배론/허브/공통, role: staff/system/viewer.
+        &nbsp;(dept_function·role 은 선택). org_affil: 배움/배론/허브/공통, role:
+        staff/dept_monitor/org_monitor/system/exec/system_admin (viewer는 폐기값 — 신규 부여 불가).
       </p>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -334,7 +337,17 @@ function CsvImportPanel() {
 
 // ---------- 메인 ----------
 export function Accounts() {
-  const { data: users, isLoading, isError, refetch } = useUsers()
+  const { profile } = useAuth()
+  const allowed = canManageAccounts(profile?.role)
+  const { data: users, isLoading, isError, refetch } = useUsers(allowed)
+
+  if (!allowed) {
+    return (
+      <div className="p-8 text-center text-gray-500" role="status">
+        계정 관리 권한이 없습니다.
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6">
@@ -342,7 +355,7 @@ export function Accounts() {
       <div>
         <h1 className="text-lg font-bold text-gray-900">계정 관리</h1>
         <p className="mt-0.5 text-sm text-gray-500">
-          직원 계정의 역할·부서·소속기관을 관리합니다. system 전용.
+          직원 계정의 역할·부서·소속기관을 관리합니다. 시스템팀 관리자 전용.
         </p>
       </div>
 

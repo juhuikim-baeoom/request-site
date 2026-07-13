@@ -11,11 +11,11 @@ interface NavItem {
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { to: '/requests/new', label: '요청 접수', roles: ['staff', 'system'] },
-  { to: '/requests/mine', label: '내 요청', roles: ['staff', 'system'] },
-  { to: '/board', label: '관리 보드', roles: ['system'] },
-  { to: '/dashboard', label: '통계', roles: ['system', 'viewer'] },
-  { to: '/accounts', label: '계정 관리', roles: ['system'] },
+  { to: '/requests/new', label: '요청 접수', roles: ['staff', 'dept_monitor', 'org_monitor', 'system', 'exec', 'system_admin'] },
+  { to: '/requests/mine', label: '내 요청', roles: ['staff', 'dept_monitor', 'org_monitor', 'system', 'exec', 'system_admin'] },
+  { to: '/board', label: '관리 보드', roles: ['system', 'system_admin'] },
+  { to: '/dashboard', label: '통계', roles: ['system', 'system_admin', 'exec'] },
+  { to: '/accounts', label: '계정 관리', roles: ['system_admin'] },
 ]
 
 export function TopNav() {

@@ -30,29 +30,29 @@ export const router = createBrowserRouter([
       { path: 'requests/mine', element: <MyRequests /> },
       { path: 'requests/:id', element: <RequestDetail /> },
 
-      // system 전용
+      // canProcess: system·system_admin
       {
         path: 'board',
         element: (
-          <RequireRole allow={['system']}>
+          <RequireRole allow={['system', 'system_admin']}>
             <ManageBoard />
           </RequireRole>
         ),
       },
-      // system + viewer
+      // canSeeDashboard: system·system_admin·exec
       {
         path: 'dashboard',
         element: (
-          <RequireRole allow={['system', 'viewer']}>
+          <RequireRole allow={['system', 'system_admin', 'exec']}>
             <Dashboard />
           </RequireRole>
         ),
       },
-      // system 전용
+      // canManageAccounts: system_admin 전용
       {
         path: 'accounts',
         element: (
-          <RequireRole allow={['system']}>
+          <RequireRole allow={['system_admin']}>
             <Accounts />
           </RequireRole>
         ),
