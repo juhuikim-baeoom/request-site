@@ -256,7 +256,7 @@ export function useCancelRequest(id: number) {
   })
 }
 
-// ---------- 관리 보드 (시스템팀) ----------
+// ---------- 요청 처리 화면 (시스템팀) ----------
 export interface BoardProfile {
   id: string
   name: string | null

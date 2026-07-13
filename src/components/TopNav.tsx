@@ -17,7 +17,7 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { to: '/requests/new', label: '요청 접수', can: canAccessApp },
   { to: '/requests/mine', label: '요청 목록', can: canAccessApp },
-  { to: '/board', label: '관리 보드', can: canProcess },
+  { to: '/board', label: '요청 처리', can: canProcess },
   { to: '/dashboard', label: '통계', can: canSeeDashboard },
   { to: '/accounts', label: '계정 관리', can: canManageAccounts },
 ]

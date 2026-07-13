@@ -110,7 +110,7 @@ export function RequestDetail() {
   const [searchParams] = useSearchParams()
   const backToBoard = searchParams.get('from') === 'board' && canProcessRequest
   const backTo = backToBoard ? '/board' : '/requests/mine'
-  const backLabel = backToBoard ? '관리 보드' : '요청 목록'
+  const backLabel = backToBoard ? '요청 처리' : '요청 목록'
 
   const { data, isLoading, error } = useRequestDetail(id)
   const { data: attachments } = useRequestAttachments(id)
