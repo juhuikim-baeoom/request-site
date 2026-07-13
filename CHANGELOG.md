@@ -4,6 +4,27 @@
 
 ## [Unreleased]
 
+### Added
+- **공유 설정 사후 수정** (`server/src/services/sharing.ts`, `PUT /api/requests/:id/sharing`, `GET /api/requests/:id/sharing-history`, `src/features/requests/SharingEditor.tsx`, `server/drizzle/0007_request_sharing_history.sql`): 접수 후에도 공개범위와 공유 대상(직무·세부부서)을 바꿀 수 있다. 처리 중 다른 부서·기관이 봐야 한다는 사실이 드러났을 때 대응할 수 있게 하기 위함이다.
+  - 권한 `canChangeSharing`(`server/src/authz.ts`): `canProcess`(system·system_admin) 또는 요청자 본인(상태 무관, 종결 후에도). 공유는 처리 내용을 바꾸지 않고 "누가 볼 수 있는가"만 바꾸므로 본문 편집(`canProcess` 또는 요청자 본인 && `status='접수'`)보다 넓게 열었다. 서버가 DB의 `requester_id`로 판정한다.
+  - 공유 대상은 **전체 교체** — 넘긴 목록이 곧 최종 상태이므로 추가·제거가 한 번의 호출로 처리된다. 입력 검증 헬퍼 `parseSharedTargets()`를 접수(`POST /api/requests`)와 이 엔드포인트가 공유해, 잘못된 `target_type`/`target_value`가 DB CHECK 위반으로 새어 500이 되던 비대칭을 없앴다(400 `INVALID_TARGET_TYPE`/`INVALID_TARGET_VALUE`/`INVALID_SHARED_TARGETS`). 접수(POST)의 공유 대상 와이어 키를 `sharedTargets` → `shared_targets`로 통일했다(클라이언트도 함께 수정).
+  - 공유 대상 선택 UI를 `SharingEditor`로 추출해 접수 폼과 상세 화면이 공유한다. 상세 화면에는 공개범위 뱃지 옆 "공유 범위 수정" 버튼(권한 있는 사람에게만)으로 노출된다.
+  - 변경 이력을 `request_sharing_history`(마이그레이션 `0007`)에 남긴다. `added`/`removed`는 서버가 기존 목록과 비교해 계산한다(클라이언트가 보낸 값은 신뢰하지 않음). 공개범위·공유 대상이 둘 다 그대로면 이력을 남기지 않는다. TOCTOU 방지를 위해 `SELECT ... FOR UPDATE`로 요청 행을 잠근 뒤 같은 트랜잭션에서 교체·이력 기록을 수행한다.
+  - 이력은 상세 응답에 포함하지 않고 독립 엔드포인트 `GET /api/requests/:id/sharing-history`로 서빙한다 — 이 코드베이스가 상태 이력·첨부를 독립 엔드포인트로 서빙하는 기존 관례를 따랐다. 권한은 `canSeeRequest`(요청을 볼 수 있으면 이력도 볼 수 있음), 거부 시 404. 상세 화면의 통합 타임라인에 "공유변경" 행으로 표시된다.
+  - 새로 공유된 사람들에게 알림은 보내지 않는다 — 공유 대상은 직무·부서 단위라 한 번 추가하면 대상 인원이 넓어 알림 스팸이 되기 때문이다.
+  - 테스트 `test:sharing`(`server/scripts/test-sharing.ts`) 14건: 권한(무관한 staff 403 · 요청자 본인 · 시스템팀 · exec는 열람 가능하나 처리 불가 403) · 열람 불가 시 이력도 404 · 공유 추가 후 대상 부서 사용자 목록에 실제로 나타나는지 · 이력 added 기록 · `GET .../sharing-history` 응답 내용(actor·added·removed) · 전체 교체 + added/removed 기록 · 무변경 시 이력 없음 · 종결 건 요청자 본인 변경 가능 · `PATCH` 우회로 차단(400) · 없는 요청 id 404 · 잘못된 입력 3종(400) · 중복 대상 dedupe · visibility만 변경 시 대상 행 id/created_at 보존.
+
+### Changed
+- **`visibility`를 `PATCH /api/requests/:id`에서 제거** (`server/src/routes/requests.ts`): 공개범위는 `PUT /api/requests/:id/sharing`으로만 바꾼다. 권한 규칙이 다른 두 경로가 같은 컬럼을 쓰면 낮은 쪽이 우회로가 되므로, 기존 `PATCH`는 400 `USE_SHARING_ENDPOINT`로 거부한다. 요청 상세의 본문 편집 폼에서 공개범위 select를 제거했다.
+
+### Fixed
+- **채번 트리거 `gen_seq()`가 두 가지 자기영속형 장애를 냄 — 갭 발생 시 unique 충돌 + 100번째 접수부터 자릿수 잘림** (`server/drizzle/0008_gen_seq_gap_tolerant.sql`, `server/drizzle/0009_gen_seq_lpad_overflow.sql`, `schema.sql`, `server/scripts/test-api-write.ts`): 이 브랜치의 공유 설정 작업과는 별건이지만 같이 실린 수정.
+  - **0008**: 기존 `count(*)+1` 채번 방식은 그 날짜(KST)의 중간 행이 삭제돼 seq 번호열에 갭이 생기면 이미 존재하는 seq와 충돌(unique violation)해 `POST /api/requests`가 500이 되고, 재시도해도 같은 번호를 다시 계산하므로 그 날짜가 끝날 때까지 접수가 전면 실패했다. `max(split_part(seq,'-',2)::int)+1`(실제 마지막 번호 다음)로 교체.
+  - **0009**: 0008 이후에도 `lpad(n::text, 2, '0')`이 `n`이 100 이상일 때 왼쪽 패딩 대신 결과를 2자리로 잘라내(`lpad('100','2','0')` → `'10'`) 하루 100건째 접수부터 이미 존재하는 seq와 충돌해 0008이 막으려던 것과 동일한 장애가 재발했다. `case when n < 100 then lpad(...) else n::text end`로 교체.
+  - 동시 접수 직렬화(`pg_advisory_xact_lock`)는 두 수정 모두에서 유지된다 — 문제는 채번 계산식이었다. forward-only 원칙에 따라 새 마이그레이션 파일로 `create or replace function`했다(기존 파일 편집 없음).
+  - 회귀 테스트 2건(`test:api-write`): 갭 재현(중간 행 삭제 후 접수 성공·충돌 없음 확인), 99건 시드 후 100번째 접수가 3자리 seq로 성공하는지 확인.
+  - docs sync: `docs/reference/db-schema.md` §10에 "교훈 4"로 상세 기록.
+
 ### Changed
 - **`RequireRole`이 역할 배열 대신 능력 술어를 받도록 변경 — 능력→역할 매핑 드리프트 함정 제거** (`src/auth/RequireRole.tsx`, `src/routes.tsx`, `src/components/TopNav.tsx`, `src/lib/permissions.ts`): `TopNav.tsx`의 메뉴 `roles` 배열과 `routes.tsx`의 `RequireRole allow={[...]}`가 능력→역할 매핑을 `src/lib/permissions.ts`와 별도로 두 곳 더 복제하고 있어, 역할이 늘 때마다 세 곳을 다 고쳐야 하고 하나라도 빠뜨리면 메뉴 노출과 실제 접근 권한이 어긋날 수 있었다. `RequireRole`의 prop을 `allow: UserRole[]` → `can: (role) => boolean`으로 바꾸고 `routes.tsx`가 `canProcess`·`canSeeDashboard`·`canManageAccounts`를 직접 전달하도록 수정, `TopNav.tsx`의 `NAV_ITEMS`도 `roles` 배열 대신 같은 능력 함수를 참조하도록 변경했다. "요청 접수"·"내 요청"처럼 특정 능력이 아니라 "폐기되지 않은 로그인 역할 전부"에 노출하던 항목을 위해 `permissions.ts`에 `canAccessApp`(내부적으로 `constants.ts`의 `ASSIGNABLE_ROLES`를 참조)을 신설 — 이로써 능력→역할 매핑의 소스는 `src/lib/permissions.ts` 하나로 수렴한다. 노출 규칙 자체(요청 접수·내 요청=전 역할, 관리 보드=`canProcess`, 통계=`canSeeDashboard`, 계정 관리=`canManageAccounts`)는 변경 없음. 권한 경계는 여전히 서버(`server/src/authz.ts`)가 강제하며 이번 변경은 클라이언트 화면 노출 로직에만 영향을 준다. `grep -rn "RequireRole" src/`로 다른 사용처가 없음을 확인했다.
   - docs sync: 화면 노출 규칙 불변(내부 리팩토링) — `docs/reference/requirements.md`·`docs/00-overview/index.md` 갱신 스킵.
