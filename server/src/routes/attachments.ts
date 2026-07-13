@@ -3,7 +3,7 @@ import { createReadStream } from 'node:fs'
 import { sql } from 'drizzle-orm'
 import { db } from '../db/client.js'
 import { authenticate } from '../auth/session.js'
-import { canSeeRequest, canSeeAllRequests } from '../authz.js'
+import { canSeeRequest, canSeeAllRequests, canSeeComment } from '../authz.js'
 import { saveUpload, resolveUpload } from '../storage.js'
 import { parseId } from '../http.js'
 import type { CurrentUser } from '../types.js'
@@ -62,6 +62,16 @@ export async function attachmentRoutes(app: FastifyInstance) {
     // (시스템팀이 요청자에게 전달하는 산출물 파일 다운로드 지원)
     const canDownload = canSeeAllRequests(u) || att.uploaded_by === u.id || (await canSee(u, att.request_id))
     if (!canDownload) { reply.code(404).send({ error: 'not found' }); return }
+    // 내부메모에 딸린 첨부는 본문과 같은 규칙(canSeeComment)으로 한 번 더 좁힌다 —
+    // 위 기본 게이트를 통과했더라도(exec의 canSeeAllRequests, 모니터링 관리자의 canSee 등)
+    // 내부메모 첨부는 canSeeInternal이거나 그 댓글 작성자가 아니면 다운로드 불가
+    if (att.comment_id) {
+      const c = await db.execute<any>(sql`select is_internal, author_id from request_comments where id = ${att.comment_id}`)
+      const comment = c.rows[0]
+      if (comment && !canSeeComment(u, { isInternal: comment.is_internal, authorId: comment.author_id })) {
+        reply.code(404).send({ error: 'not found' }); return
+      }
+    }
     reply.header('Content-Type', att.mime_type ?? 'application/octet-stream')
     reply.header('X-Content-Type-Options', 'nosniff') // 클라이언트 지정 MIME 스니핑 방지
     reply.header('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(att.file_name ?? 'file')}`)

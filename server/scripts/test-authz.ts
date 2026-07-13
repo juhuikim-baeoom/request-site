@@ -127,30 +127,41 @@ console.log('AUTHZ TEST OK')
     return new Set(rows.rows.map((x) => Number(x.id)))
   }
 
-  // 부서 모니터링(배움·교학팀): 같은 부서 건만
-  // id는 실제 requester_id(uuid 컬럼)와 비교되므로 유효한 uuid 형식이어야 한다(존재하는 행일 필요는 없음).
-  const dm = { id: randomUUID(), email: 'dm@baeoom.com', name: null, orgAffil: '배움', deptFunction: '교학팀', role: 'dept_monitor' } as any
-  const dmSee = await visibleTo(dm)
-  assert.ok(dmSee.has(reqSameDept.id), 'dept_monitor: 같은 부서 요청 보임')
-  assert.ok(!dmSee.has(reqSameOrgOtherFn.id), 'dept_monitor: 같은 기관 다른 직무 요청 안 보임')
-  assert.ok(!dmSee.has(reqOtherOrg.id), 'dept_monitor: 다른 기관 요청 안 보임')
+  // 실패 시에도 생성한 테스트 사용자·요청 행을 반드시 정리한다
+  try {
+    // 부서 모니터링(배움·교학팀): 같은 부서 건만
+    // id는 실제 requester_id(uuid 컬럼)와 비교되므로 유효한 uuid 형식이어야 한다(존재하는 행일 필요는 없음).
+    const dm = { id: randomUUID(), email: 'dm@baeoom.com', name: null, orgAffil: '배움', deptFunction: '교학팀', role: 'dept_monitor' } as any
+    const dmSee = await visibleTo(dm)
+    assert.ok(dmSee.has(reqSameDept.id), 'dept_monitor: 같은 부서 요청 보임')
+    assert.ok(!dmSee.has(reqSameOrgOtherFn.id), 'dept_monitor: 같은 기관 다른 직무 요청 안 보임')
+    assert.ok(!dmSee.has(reqOtherOrg.id), 'dept_monitor: 다른 기관 요청 안 보임')
 
-  // 기관 모니터링(배움): 같은 기관 전부
-  const om = { ...dm, role: 'org_monitor' } as any
-  const omSee = await visibleTo(om)
-  assert.ok(omSee.has(reqSameDept.id) && omSee.has(reqSameOrgOtherFn.id), 'org_monitor: 같은 기관 요청 보임')
-  assert.ok(!omSee.has(reqOtherOrg.id), 'org_monitor: 다른 기관 요청 안 보임')
+    // 기관 모니터링(배움): 같은 기관 전부
+    const om = { ...dm, role: 'org_monitor' } as any
+    const omSee = await visibleTo(om)
+    assert.ok(omSee.has(reqSameDept.id) && omSee.has(reqSameOrgOtherFn.id), 'org_monitor: 같은 기관 요청 보임')
+    assert.ok(!omSee.has(reqOtherOrg.id), 'org_monitor: 다른 기관 요청 안 보임')
 
-  // 소속 null인 모니터링 관리자: 추가 범위 없음
-  const dmNull = { ...dm, orgAffil: null, deptFunction: null } as any
-  const nullSee = await visibleTo(dmNull)
-  assert.ok(!nullSee.has(reqSameDept.id), 'orgAffil null: 추가 범위 없음')
+    // 소속 null인 모니터링 관리자: 추가 범위 없음
+    const dmNull = { ...dm, orgAffil: null, deptFunction: null } as any
+    const nullSee = await visibleTo(dmNull)
+    assert.ok(!nullSee.has(reqSameDept.id), 'orgAffil null: 추가 범위 없음')
 
-  console.log('모니터링 열람 범위 OK')
+    // 비모니터(staff)는 모니터링 OR 분기의 수혜자가 아니다 — 같은 기관·다른 직무 private 요청은
+    // visibilityFilter에 새 OR 분기가 추가되며 새면 기관 전체 유출로 이어지므로 반드시 부정 단언한다.
+    const staffSee = await visibleTo(staffBaeumEdu)
+    assert.ok(
+      !staffSee.has(reqSameOrgOtherFn.id),
+      'staff(배움·교학팀)는 같은 기관·다른 직무의 private 요청을 보면 안 됨 (모니터링 OR 분기 유출 방지)',
+    )
 
-  // 정리
-  await db.delete(requests).where(inArray(requests.id, [reqSameDept.id, reqSameOrgOtherFn.id, reqOtherOrg.id]))
-  await db.delete(users).where(inArray(users.id, [staffBaeumEduId, staffBaeumOtherFnId, staffBaeronId]))
+    console.log('모니터링 열람 범위 OK')
+  } finally {
+    // 정리
+    await db.delete(requests).where(inArray(requests.id, [reqSameDept.id, reqSameOrgOtherFn.id, reqOtherOrg.id]))
+    await db.delete(users).where(inArray(users.id, [staffBaeumEduId, staffBaeumOtherFnId, staffBaeronId]))
+  }
 }
 
 await pool.end()

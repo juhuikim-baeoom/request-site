@@ -147,9 +147,16 @@ export async function requestDetailRoutes(app: FastifyInstance) {
     if (id === null) { reply.code(404).send({ error: 'not found' }); return }
     const { found, ok } = await loadForSee(u, id)
     if (!guard(reply, found, ok)) return
+    // 댓글에 딸린 첨부는 그 댓글의 내부메모 여부·작성자를 함께 읽어와
+    // canSeeComment와 동일한 규칙으로 필터링한다(본문을 감추면서 첨부만 새는 것 방지)
     const r = await db.execute<any>(sql`
-      select * from request_attachments where request_id = ${id} order by created_at asc`)
+      select a.*, c.is_internal as _comment_is_internal, c.author_id as _comment_author_id
+      from request_attachments a
+      left join request_comments c on c.id = a.comment_id
+      where a.request_id = ${id} order by a.created_at asc`)
     return r.rows
+      .filter((row: any) => canSeeComment(u, { isInternal: row._comment_is_internal ?? false, authorId: row._comment_author_id ?? null }))
+      .map(({ _comment_is_internal, _comment_author_id, ...att }: any) => att)
   })
 
   // CSAT 제출 (요청자 전용, status='완료'일 때)
