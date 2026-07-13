@@ -327,10 +327,13 @@ export function ManageBoard() {
     })
   }, [rows, deferredQ, org, typeCode, due, assignee, showClosed, nameById])
 
+  // 접수 컬럼은 '배정된 접수 건'만 담는다.
+  // 미배정 접수 건은 상단 미배정 큐가 담당한다 (두 영역은 배타적 — 중복 표시 방지).
   const byStatus = useMemo(() => {
     const m = new Map<RequestStatus, typeof filtered>()
     for (const s of BOARD_STATUSES) m.set(s, [])
     for (const r of filtered) {
+      if (r.status === '접수' && !r.assignee_id) continue
       if (r.status && m.has(r.status as RequestStatus)) {
         m.get(r.status as RequestStatus)!.push(r)
       }
@@ -729,7 +732,16 @@ export function ManageBoard() {
 
       {/* ---- 트리아지 존 (미배정 큐) ---- */}
       {triageQueue.length > 0 && (
-        <div className="rounded-xl border-2 border-dashed border-amber-300 bg-amber-50/60 p-3">
+        <div
+          className={`rounded-xl border-2 border-dashed p-3 transition-colors ${
+            dragOverStatus === '접수'
+              ? 'border-brand bg-brand/5'
+              : 'border-amber-300 bg-amber-50/60'
+          }`}
+          onDragOver={(e) => onDragOver(e, '접수')}
+          onDragLeave={() => setDragOverStatus(null)}
+          onDrop={(e) => onDrop(e, '접수')}
+        >
           <div className="mb-2 flex items-center gap-2">
             <span className="text-sm font-bold text-amber-800">미배정 큐</span>
             <span className="rounded-full bg-amber-200 px-2 py-0.5 text-xs font-bold text-amber-800 tabular-nums">
@@ -1064,7 +1076,8 @@ export function ManageBoard() {
       )}
 
       <p className="text-xs text-gray-400">
-        칸반에서 카드를 드래그해 상태를 변경합니다. 미배정 큐에서 배정 후 진행중으로 이동됩니다.
+        칸반에서 카드를 드래그해 상태를 변경합니다. 미배정 큐에서 배정하면 진행중으로 이동하고,
+        진행중 카드를 접수 컬럼이나 미배정 큐에 놓으면 배정이 취소되어 미배정 큐로 돌아갑니다.
         보드는 빈 공간을 마우스로 잡아 좌우로 끌 수 있습니다.
       </p>
 
