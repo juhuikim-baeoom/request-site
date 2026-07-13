@@ -296,7 +296,7 @@ try {
 
   // ──────────────────────────────────────────
   // (5) GET /api/users — canProcess(system·system_admin)만 (canManageAccounts 아님, 의도적 경계)
-  //     routes/users.ts 주석대로 이 API는 관리 보드/AdminPanel.tsx의 담당자 select가 후보
+  //     routes/users.ts 주석대로 이 API는 요청 처리 화면/AdminPanel.tsx의 담당자 select가 후보
   //     목록을 가져오는 데 쓴다. 누군가 "계정 API니까"라며 canManageAccounts로 좁히면
   //     담당자 배정 UI가 조용히 깨지는데 기존 테스트는 이를 잡지 못했다(리뷰 공백 1).
   // ──────────────────────────────────────────
@@ -406,7 +406,7 @@ try {
     const r2 = await call(exec.sid, 'GET', '/api/profiles')
     assert.equal(r2.statusCode, 403, `exec는 /api/profiles 조회 불가, got ${r2.statusCode}`)
 
-    // positive controls — 관리 보드(useAllProfiles)의 유일한 소비자가 canProcess 전용 화면이므로
+    // positive controls — 요청 처리 화면(useAllProfiles)의 유일한 소비자가 canProcess 전용 화면이므로
     const r3 = await call(system.sid, 'GET', '/api/profiles')
     assert.equal(r3.statusCode, 200, `system은 /api/profiles 조회 가능해야 함, got ${r3.statusCode}`)
     assert.ok(Array.isArray(r3.json()), '/api/profiles 응답은 배열이어야 함')
