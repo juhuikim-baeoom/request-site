@@ -11,8 +11,9 @@ import {
   dueBadgeClass,
 } from '../../lib/constants'
 import { fmtDateTime } from '../../lib/format'
-import type { PriorityLevel, RequestVisibility } from '../../types/database'
+import type { PriorityLevel, RequestStatus, RequestVisibility } from '../../types/database'
 import type { Urgency } from '../../lib/constants'
+import { AdminPanel } from './AdminPanel'
 import {
   getAttachmentUrl,
   useAddComment,
@@ -25,6 +26,7 @@ import {
   useRework,
   useUpdateRequest,
   useUploadCommentAttachment,
+  type ImpactLevel,
 } from './api'
 
 const fieldCls =
@@ -217,7 +219,7 @@ export function RequestDetail() {
   }
 
   const { view: v, requester, assignee, sharedTargets } = data
-  const canEdit = v.requester_id === profile?.id && v.status === '접수'
+  const canEdit = isSystemUser || (v.requester_id === profile?.id && v.status === '접수')
   const isRequester = v.requester_id === profile?.id
   const canRework = isSystemUser && v.status === '완료'
   const canCsat =
@@ -337,6 +339,17 @@ export function RequestDetail() {
           </div>
         )}
       </div>
+
+      {/* 시스템팀 전용 관리 패널 — 담당자·상태·영향도를 상세 화면에서 바로 변경 */}
+      {isSystemUser && (
+        <AdminPanel
+          requestId={id}
+          status={v.status as RequestStatus}
+          assigneeId={v.assignee_id ?? null}
+          impact={(v.impact as ImpactLevel) ?? null}
+          priorityLevel={v.priority_level ?? null}
+        />
+      )}
 
       {/* 액션 버튼 영역 */}
       {(canEdit || canRework) && !editing && (

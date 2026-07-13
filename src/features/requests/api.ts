@@ -15,6 +15,7 @@ import type {
   RequestSharedTarget,
   DeptOption,
   SharedTargetType,
+  PriorityLevel,
 } from '../../types/database'
 import type { Urgency } from '../../lib/constants'
 
@@ -326,6 +327,22 @@ export function useAssignRequest() {
         assigneeId: vars.assigneeId,
         impact: vars.impact,
       }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['requests'] })
+    },
+  })
+}
+
+/** 영향도 재조정 (시스템팀 전용) — priority_level·SLA 기한이 서버에서 재산정된다 */
+export function useChangeImpact(id: number) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (vars: { impact: ImpactLevel }) =>
+      apiSend<{ ok: boolean; priority_level: PriorityLevel }>(
+        'PATCH',
+        `/api/requests/${id}/impact`,
+        { impact: vars.impact },
+      ),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['requests'] })
     },
