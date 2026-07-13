@@ -215,8 +215,8 @@ export async function requestRoutes(app: FastifyInstance) {
       const u = request.currentUser!
       if (!isSystem(u)) { reply.code(403); return { error: 'forbidden' } }
 
-      const id = Number(request.params.id)
-      if (!Number.isInteger(id)) { reply.code(400); return { error: 'invalid id' } }
+      const id = parseId(request.params.id)
+      if (id === null) { reply.code(404); return { error: 'not found' } }
 
       const b = request.body ?? {}
       if (!isOneOf(PRIORITIES, b.impact as string)) {
