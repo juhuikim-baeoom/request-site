@@ -183,3 +183,5 @@ npm run db:smoke     # seq 생성·상태이력·뷰 조회 검증
 ```
 
 enum 값 변경 필요 시 drizzle 파일 전체 재생성 후 DB 초기화.
+
+**교훈**: `ALTER TYPE ... ADD VALUE`로 추가한 enum 값은 같은 트랜잭션 안에서 사용(SELECT/UPDATE 등)할 수 없다. drizzle-orm 마이그레이터(`drizzle-orm/node-postgres/migrator`)는 대기 중인 모든 마이그레이션 파일을 단일 트랜잭션으로 묶어 실행하므로, 값 추가와 그 값을 쓰는 데이터 이전을 파일만 나눠서는 우회할 수 없다 — **값 추가는 마이그레이션, 그 값을 쓰는 데이터 이전은 `migrate()` 완료(트랜잭션 커밋) 후 실행되는 멱등 백필**(예: `server/src/db/backfill-roles.ts`, `server/src/db/migrate.ts`에서 호출)로 분리한다.
