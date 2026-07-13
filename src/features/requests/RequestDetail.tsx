@@ -26,6 +26,7 @@ import {
   useUploadCommentAttachment,
 } from './api'
 import { InspectionPanel } from './InspectionPanel'
+import { DisputePanel } from './DisputePanel'
 
 const fieldCls =
   'mt-1 block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand'
@@ -524,6 +525,9 @@ export function RequestDetail() {
 
       {/* 검수 패널 (검수대기 상태에서만 렌더) */}
       <InspectionPanel request={v} requestId={id} isOwner={isRequester} isSystem={isSystemUser} />
+
+      {/* 이의제기 패널 (완료 상태 또는 이의 이력이 있을 때만 렌더) */}
+      <DisputePanel request={v} requestId={id} isOwner={isRequester} isSystem={isSystemUser} />
 
       {/* 통합 타임라인 */}
       <div>
