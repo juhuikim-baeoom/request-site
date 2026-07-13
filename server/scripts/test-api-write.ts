@@ -152,9 +152,13 @@ await db.delete(requests).where(eq(requests.id, reqId))
   assert.equal(a3.impact, null, 'impact는 여전히 null (미배정 유지)')
   assert.equal(a3.priority_level, null, 'priority_level은 미배정 상태이므로 여전히 미정')
   assert.equal(a3.status, '접수', 'status 보존')
-  assert.notEqual(
-    String(a3.response_due_at), String(b3.response_due_at),
-    'I-1 회귀: 미배정 건도 긴급도 편집 시 response_due_at이 새 긴급도 기준으로 재산정되어야 함',
+  // 낮음(P4, 960분) → 높음(P2, 240분)로 올렸으므로 기한이 앞당겨져야 한다.
+  // 단순 부등호(notEqual)만 검사하면 "값이 바뀌긴 했지만 반대 방향으로 재계산"하는
+  // 회귀(예: 긴급도-분 매핑 역전)를 잡지 못하므로 방향까지 단언한다.
+  assert.ok(
+    new Date(a3.response_due_at).getTime() < new Date(b3.response_due_at).getTime(),
+    `I-1 회귀: 미배정 건 긴급도를 낮음→높음으로 올리면 response_due_at이 더 이른 시각으로 재산정되어야 함 ` +
+      `(before=${b3.response_due_at}, after=${a3.response_due_at})`,
   )
   console.log('unassigned urgency edit ok: response_due_at만 재산정, impact/priority_level 미배정 유지')
 

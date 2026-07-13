@@ -59,8 +59,11 @@ export async function changeImpact({
       throw new ImpactError('배정된 요청만 영향도를 조정할 수 있습니다', 'NOT_ASSIGNED')
     }
 
-    // assignee_id가 세팅된 건은 항상 assignRequest가 first_response_at도 함께 세팅했으므로
-    // (transition.ts의 진행중→접수 되돌리기도 둘을 함께 null로 되돌린다) 여기서는 항상 값이 있다.
+    // assignRequest는 assignee_id·first_response_at을 함께 세팅하지만, 인라인 담당자 지정
+    // (PATCH /api/requests/:id { assignee_id })은 assignee_id만 UPDATE하고 first_response_at은
+    // 건드리지 않는다 — 그 경로를 거치면 assignee_id != null && first_response_at = null인 행이
+    // 실제로 생긴다. 이 널가드는 그 경로에서 실제로 도달한다: null이면 아직 미응답 건으로 보고
+    // 현재 시각을 기준으로 breach를 판정한다(대시보드 응답 SLA 준수율 정의와 일치).
     const firstResponseAt = row.first_response_at != null ? new Date(row.first_response_at) : null
 
     const sla = await computeSlaFields({

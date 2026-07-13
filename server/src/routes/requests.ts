@@ -193,8 +193,11 @@ export async function requestRoutes(app: FastifyInstance) {
         const r2 = cur2.rows[0]
         if (r2 && !CLOSED.includes(r2.status) && b.urgency !== r2.urgency) {
           if (r2.impact != null) {
-            // assignee_id가 세팅된(=impact가 있는) 건은 항상 first_response_at도 함께 세팅되어 있다
-            // (assign.ts가 둘을 같이 세팅하고, transition.ts의 되돌리기도 둘을 같이 null로 되돌린다).
+            // assign.ts는 assignee_id·first_response_at을 함께 세팅하지만, 인라인 담당자 지정
+            // (PATCH /api/requests/:id { assignee_id })은 assignee_id만 UPDATE하고 first_response_at은
+            // 건드리지 않는다 — 그 경로를 거치면 impact != null && first_response_at = null인 행이
+            // 실제로 생긴다. 이 널가드는 그 경로에서 실제로 도달한다: null이면 아직 미응답 건으로 보고
+            // 현재 시각을 기준으로 breach를 판정한다(대시보드 응답 SLA 준수율 정의와 일치).
             const firstResponseAt = r2.first_response_at != null ? new Date(r2.first_response_at) : null
             const sla = await computeSlaFields({
               tx,
