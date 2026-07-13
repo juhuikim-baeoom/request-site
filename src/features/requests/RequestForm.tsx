@@ -723,7 +723,7 @@ function CompletionCard({ result, onNewRequest }: CompletionCardProps) {
             to="/requests/mine"
             className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
           >
-            내 요청 보기
+            요청 목록 보기
           </Link>
         </div>
       </div>

@@ -106,11 +106,11 @@ export function RequestDetail() {
   const canProcessRequest = canProcess(profile?.role)
   const canViewInternal = canSeeInternal(profile?.role)
 
-  // 진입 경로(?from=)에 따라 되돌아갈 목록을 정한다. 알림 등 출처 없는 진입은 내 요청 목록.
+  // 진입 경로(?from=)에 따라 되돌아갈 목록을 정한다. 알림 등 출처 없는 진입은 요청 목록.
   const [searchParams] = useSearchParams()
   const backToBoard = searchParams.get('from') === 'board' && canProcessRequest
   const backTo = backToBoard ? '/board' : '/requests/mine'
-  const backLabel = backToBoard ? '관리 보드' : '내 요청 목록'
+  const backLabel = backToBoard ? '요청 처리' : '요청 목록'
 
   const { data, isLoading, error } = useRequestDetail(id)
   const { data: attachments } = useRequestAttachments(id)

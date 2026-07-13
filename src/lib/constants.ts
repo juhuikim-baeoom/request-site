@@ -45,10 +45,10 @@ export const STATUS_OPTIONS: RequestStatus[] = [
   '철회',
 ]
 
-// 관리 보드 칸반 컬럼 — 철회는 아카이브성이므로 보드에서 제외
+// 요청 처리 화면의 칸반 컬럼 — 철회는 아카이브성이므로 제외
 export const BOARD_STATUSES: RequestStatus[] = ['접수', '진행중', '보류', '완료', '반려']
 
-// 열린(진행 중인) 상태 — 내 요청 기본 저장뷰에서 종결 제외 필터에 사용
+// 열린(진행 중인) 상태 — 요청 목록 기본 저장뷰에서 종결 제외 필터에 사용
 export const OPEN_STATUSES: RequestStatus[] = ['접수', '진행중', '보류']
 
 // 종결 상태 — server/src/services/impact.ts의 CLOSED와 동일 (영향도 소급 변경 금지 기준)

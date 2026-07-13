@@ -271,7 +271,7 @@ export function ManageBoard() {
 
   // 드래그 드롭 상태 (HTML5 dragover/drop API)
   const [dragId, setDragId] = useState<number | null>(null)
-  // 'queue' = 미배정 큐, RequestStatus = 칸반 컬럼 — 두 영역은 의미가 달라 별도로 하이라이트한다.
+  // 'queue' = 배정 대기, RequestStatus = 칸반 컬럼 — 두 영역은 의미가 달라 별도로 하이라이트한다.
   const [dragOverZone, setDragOverZone] = useState<'queue' | RequestStatus | null>(null)
 
   // 칸반 가로 팬
@@ -322,7 +322,7 @@ export function ManageBoard() {
     })
   }, [rows, deferredQ, org, typeCode, due, assignee, showClosed, nameById])
 
-  // 미배정 큐도 filtered를 소스로 써야 필터(기관·담당 등)와 헤더 건수 표시가 일치한다.
+  // 배정 대기도 filtered를 소스로 써야 필터(기관·담당 등)와 헤더 건수 표시가 일치한다.
   // 접수는 종결 상태가 아니므로 showClosed 토글과 충돌하지 않는다.
   const triageQueue = useMemo(
     () => filtered.filter((r) => r.status === '접수' && !r.assignee_id),
@@ -330,7 +330,7 @@ export function ManageBoard() {
   )
 
   // 접수 컬럼은 '배정된 접수 건'만 담는다.
-  // 미배정 접수 건은 상단 미배정 큐가 담당한다 (두 영역은 배타적 — 중복 표시 방지).
+  // 미배정 접수 건은 상단 배정 대기가 담당한다 (두 영역은 배타적 — 중복 표시 방지).
   const byStatus = useMemo(() => {
     const m = new Map<RequestStatus, typeof filtered>()
     for (const s of BOARD_STATUSES) m.set(s, [])
@@ -646,7 +646,7 @@ export function ManageBoard() {
 
       {/* ---- 헤더 ---- */}
       <div className="flex flex-wrap items-center gap-3">
-        <h1 className="text-xl font-bold text-gray-900">관리 보드</h1>
+        <h1 className="text-xl font-bold text-gray-900">요청 처리</h1>
         <div className="flex min-w-[220px] flex-1 items-center gap-2 rounded-lg border border-gray-300 bg-white px-3 py-2 shadow-sm focus-within:border-brand focus-within:ring-1 focus-within:ring-brand">
           <span className="text-gray-400" aria-hidden="true">⌕</span>
           <input
@@ -735,7 +735,7 @@ export function ManageBoard() {
         </label>
       </div>
 
-      {/* ---- 트리아지 존 (미배정 큐) ---- */}
+      {/* ---- 트리아지 존 (배정 대기) ---- */}
       {triageQueue.length > 0 && (
         <div
           className={`rounded-xl border-2 border-dashed p-3 transition-colors ${
@@ -748,7 +748,7 @@ export function ManageBoard() {
           onDrop={(e) => onDrop(e, 'queue')}
         >
           <div className="mb-2 flex items-center gap-2">
-            <span className="text-sm font-bold text-amber-800">미배정 큐</span>
+            <span className="text-sm font-bold text-amber-800">배정 대기</span>
             <span className="rounded-full bg-amber-200 px-2 py-0.5 text-xs font-bold text-amber-800 tabular-nums">
               {triageQueue.length}
             </span>
@@ -1096,9 +1096,9 @@ export function ManageBoard() {
       )}
 
       <p className="text-xs text-gray-400">
-        칸반에서 카드를 드래그해 상태를 변경합니다. 미배정 큐에서 배정하면 진행중으로 이동하고,
-        진행중 카드를 접수 컬럼이나 미배정 큐에 놓으면 배정이 취소되어 미배정 큐로 돌아갑니다.
-        보드는 빈 공간을 마우스로 잡아 좌우로 끌 수 있습니다.
+        카드를 드래그해 상태를 변경합니다. 배정 대기에서 담당자를 정하면 진행중으로 이동하고,
+        진행중 카드를 접수 칸이나 배정 대기에 놓으면 배정이 취소되어 배정 대기로 돌아갑니다.
+        빈 공간을 마우스로 잡아 좌우로 끌 수 있습니다.
       </p>
 
       {/* ---- 배정 모달 ---- */}
