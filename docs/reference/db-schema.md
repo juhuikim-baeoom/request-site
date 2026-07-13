@@ -63,8 +63,8 @@ CONFLICT DO NOTHING RETURNING`)하고, claim에 성공했을 때만 실제 UPDAT
 반환해 UPDATE 자체를 건너뛰므로 관리자가 계정 관리 화면에서 수동으로 바꾼 역할이 다음 배포에서
 되살아나지 않는다.
 
-이 6개 역할에 대한 접근 제어(authz) 로직 확장은 후속 작업 범위이며, 아래 §8 표는 아직
-`staff`/`system`/`viewer` 3역할 기준의 현행 동작을 반영한다.
+이 6개 역할에 대한 접근 제어(authz)는 `server/src/authz.ts`(서버)·`src/lib/permissions.ts`
+(클라이언트 사본)의 능력(capability) 기반 판정으로 구현되어 있다. 아래 §8을 참조.
 
 ---
 
@@ -153,23 +153,47 @@ Google OAuth 연동, `@baeoom.com`/`@baeron.com` 도메인 제한.
 
 ## 8. 접근 제어
 
-RLS 없음 (Fastify 백엔드에서 역할 판정).
+RLS 없음 (Fastify 백엔드에서 역할 판정). 라우트는 역할 이름 대신 능력(capability)을
+묻는다 — 역할이 늘어도 호출부를 고치지 않기 위함이다. 정의: `server/src/authz.ts`
+(서버, source of truth) · `src/lib/permissions.ts`(클라이언트 사본, 화면 노출 편의용 —
+실제 권한 경계는 서버가 강제). 옛 `isSystem`·`isViewerUp` 헬퍼는 제거됐다.
 
-| 역할 | requests 읽기 | 등록 | 상태·담당 변경 | 삭제 |
-| --- | --- | --- | --- | --- |
-| staff | 본인 + 공개범위 해당분 | 본인 명의로 | 불가 | 불가 |
-| system | 전체 | 가능 | 가능 | 가능 |
-| viewer | 전체 | 불가 | 불가 | 불가 |
+**능력별 허용 역할**
 
-**공개범위(visibility)**
+| 능력 | 의미 | 허용 역할 |
+| --- | --- | --- |
+| `canProcess` | 배정·상태전이·영향도 조정·필드편집·내부메모 작성 | system · system_admin |
+| `canManageAccounts` | 계정·역할 변경, 조직도 import | system_admin |
+| `canSeeDashboard` | 통계 대시보드 열람 | system · system_admin · exec |
+| `canSeeInternal` | 내부메모 열람(본문 + 첨부파일) | system · system_admin |
+| `canSeeAllRequests` | 공개범위와 무관하게 전 요청 열람 | system · system_admin · exec |
+
+`staff`·`dept_monitor`·`org_monitor`와 폐기값 `viewer`는 위 5개 능력이 모두 false다
+(화이트리스트 방식 — 알 수 없는/폐기된 역할은 최소 권한).
+
+**공개범위(visibility) + 모니터링 열람 범위**
+
+`canSeeAllRequests` 역할(system·system_admin·exec)은 공개범위와 무관하게 전체 열람.
+그 외에는 아래 visibility 규칙에 더해, 모니터링 관리자가 본인 소속에서 도출한 범위를
+추가로 본다: `dept_monitor` = 같은 기관 **+** 같은 직무, `org_monitor` = 같은 기관
+전체. 본인의 `org_affil`/`dept_function`이 null이면 추가 범위 없음(false로 안전 처리).
 
 | visibility | 볼 수 있는 사람 |
 | --- | --- |
-| private | 본인 + system |
-| dept | 본인 + 같은 부서 + system |
-| function | 본인 + 같은 function + system |
-| org | 본인 + 같은 기관 + system |
+| private | 본인 + canSeeAllRequests 역할 |
+| dept | 본인 + 같은 기관·직무 + canSeeAllRequests 역할 |
+| function | 본인 + 같은 function + canSeeAllRequests 역할 |
+| org | 본인 + 같은 기관 + canSeeAllRequests 역할 |
 | shared | 전 직원 (shared_targets 참조) |
+
+목록 조회 시 위 판정은 `visibilityFilter()`가 SQL WHERE 절로, 단건 조회 시
+`canSeeRequest()`가 동일 규칙을 애플리케이션 레벨로 이식한다. 댓글의 내부메모
+(`is_internal=true`)는 `canSeeComment()`가 별도 판정 — `canSeeInternal` 역할이거나
+작성자 본인일 때만 보인다(첨부파일 목록·다운로드도 동일 규칙 공유).
+
+회귀 테스트: `server/scripts/test-authz.ts`(`npm run test:authz`, 역할×능력 매트릭스 +
+모니터링 열람 범위), `server/scripts/test-role-boundaries.ts`(`npm run test:roles`,
+API 레벨 권한 경계).
 
 ---
 
