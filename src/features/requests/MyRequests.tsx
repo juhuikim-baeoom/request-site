@@ -8,6 +8,7 @@ import {
   STATUS_OPTIONS,
   STATUS_BADGE,
   PRIORITY_LEVEL_BADGE,
+  CLOSED_STATUSES,
   dueBadgeClass,
 } from '../../lib/constants'
 import { fmtDate, fmtDateTime } from '../../lib/format'
@@ -93,8 +94,6 @@ function dueIcon(due: string | null): string {
       return ''
   }
 }
-
-const CLOSED_STATUSES: RequestStatus[] = ['완료', '반려', '철회']
 
 const selectCls =
   'rounded-md border border-gray-300 bg-white px-2.5 py-1.5 text-sm shadow-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand'

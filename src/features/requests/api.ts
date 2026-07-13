@@ -15,6 +15,7 @@ import type {
   RequestSharedTarget,
   DeptOption,
   SharedTargetType,
+  PriorityLevel,
 } from '../../types/database'
 import type { Urgency } from '../../lib/constants'
 
@@ -251,8 +252,27 @@ export function useChangeStatus() {
     onMutate: async (vars) => {
       await queryClient.cancelQueries({ queryKey: ['requests', 'view'] })
       const previous = queryClient.getQueryData<RequestView[]>(['requests', 'view'])
+      // 서버(changeStatus)는 진행중 → 접수 전이 시 배정 관련 필드를 전부 null로 비운다
+      // (server/src/services/transition.ts 참고). 낙관적 업데이트도 동일하게 맞춰
+      // 재조회 전까지 카드가 칸반 '접수'(배정됨) 컬럼에 잘못 나타나지 않게 한다.
+      const clearedOnBack: Partial<RequestView> =
+        vars.status === '접수'
+          ? {
+              assignee_id: null,
+              impact: null,
+              priority_level: null,
+              assigned_at: null,
+              first_response_at: null,
+              response_due_at: null,
+              resolution_due_at: null,
+              sla_policy_id: null,
+              sla_response_breached: false,
+            }
+          : {}
       queryClient.setQueryData<RequestView[]>(['requests', 'view'], (old) =>
-        old?.map((r) => (r.id === vars.id ? { ...r, status: vars.status } : r)),
+        old?.map((r) =>
+          r.id === vars.id ? { ...r, status: vars.status, ...clearedOnBack } : r,
+        ),
       )
       return { previous }
     },
@@ -307,6 +327,22 @@ export function useAssignRequest() {
         assigneeId: vars.assigneeId,
         impact: vars.impact,
       }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['requests'] })
+    },
+  })
+}
+
+/** 영향도 재조정 (시스템팀 전용) — priority_level·SLA 기한이 서버에서 재산정된다 */
+export function useChangeImpact(id: number) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (vars: { impact: ImpactLevel }) =>
+      apiSend<{ ok: boolean; priority_level: PriorityLevel }>(
+        'PATCH',
+        `/api/requests/${id}/impact`,
+        { impact: vars.impact },
+      ),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['requests'] })
     },

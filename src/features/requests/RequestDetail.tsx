@@ -5,6 +5,7 @@ import { CommentComposer } from './CommentComposer'
 import { Badge } from '../../components/Badge'
 import { VisibilityBadge } from '../../components/VisibilityBadge'
 import {
+  ALLOWED_TRANSITIONS,
   STATUS_BADGE,
   PRIORITY_LEVEL_BADGE,
   URGENCY_OPTIONS,
@@ -12,8 +13,9 @@ import {
   dueBadgeClass,
 } from '../../lib/constants'
 import { fmtDateTime } from '../../lib/format'
-import type { PriorityLevel, RequestVisibility } from '../../types/database'
+import type { PriorityLevel, RequestStatus, RequestVisibility } from '../../types/database'
 import type { Urgency } from '../../lib/constants'
+import { AdminPanel } from './AdminPanel'
 import {
   getAttachmentUrl,
   useAddComment,
@@ -26,6 +28,7 @@ import {
   useRework,
   useUpdateRequest,
   useUploadCommentAttachment,
+  type ImpactLevel,
 } from './api'
 
 const fieldCls =
@@ -230,7 +233,9 @@ export function RequestDetail() {
   }
 
   const { view: v, requester, assignee, sharedTargets } = data
-  const canEdit = v.requester_id === profile?.id && v.status === '접수'
+  const canEdit = isSystemUser || (v.requester_id === profile?.id && v.status === '접수')
+  // 철회는 전이 매트릭스상 '접수' 상태에서만 유효 (server/src/services/transition.ts ALLOWED와 동일 기준)
+  const canWithdraw = canEdit && (ALLOWED_TRANSITIONS[v.status as RequestStatus] ?? []).includes('철회')
   const isRequester = v.requester_id === profile?.id
   const canRework = isSystemUser && v.status === '완료'
   const canCsat =
@@ -351,6 +356,18 @@ export function RequestDetail() {
         )}
       </div>
 
+      {/* 시스템팀 전용 관리 패널 — 담당자·상태·영향도를 상세 화면에서 바로 변경 */}
+      {isSystemUser && (
+        <AdminPanel
+          requestId={id}
+          status={v.status as RequestStatus}
+          assigneeId={v.assignee_id ?? null}
+          impact={(v.impact as ImpactLevel) ?? null}
+          priorityLevel={v.priority_level ?? null}
+          urgency={(v.urgency as Urgency) ?? null}
+        />
+      )}
+
       {/* 액션 버튼 영역 */}
       {(canEdit || canRework) && !editing && (
         <div className="flex flex-wrap gap-2">
@@ -362,13 +379,15 @@ export function RequestDetail() {
               >
                 수정
               </button>
-              <button
-                onClick={() => void handleWithdraw()}
-                disabled={cancelRequest.isPending}
-                className="rounded-md border border-red-300 px-3 py-1.5 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-60"
-              >
-                철회
-              </button>
+              {canWithdraw && (
+                <button
+                  onClick={() => void handleWithdraw()}
+                  disabled={cancelRequest.isPending}
+                  className="rounded-md border border-red-300 px-3 py-1.5 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-60"
+                >
+                  철회
+                </button>
+              )}
             </>
           )}
           {canRework && (

@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm'
-import { db, withUser } from '../db/client.js'
-import { derivePriority, addBusinessMinutes, type Impact, type Urgency } from '../sla.js'
+import { withUser } from '../db/client.js'
+import { type Impact, type Urgency } from '../sla.js'
+import { computeSlaFields, loadHolidaySet } from './sla-fields.js'
 import { notify } from './notify.js'
 
 export class AssignError extends Error {
@@ -30,10 +31,7 @@ export async function assignRequest({
   actorId: string
 }): Promise<void> {
   // holidays는 트랜잭션 밖에서 읽어도 무방 (변경 빈도가 낮은 참조 데이터)
-  const holidayRows = await db.execute<{ holiday_on: string }>(
-    sql`select holiday_on from holidays`,
-  )
-  const holidaySet = new Set(holidayRows.rows.map((h) => h.holiday_on))
+  const holidaySet = await loadHolidaySet()
 
   let notifySeq: string | null = null
 
@@ -50,35 +48,19 @@ export async function assignRequest({
       throw new AssignError('접수 상태인 요청만 배정할 수 있습니다', 'ONLY_FROM_RECEIVED')
     }
 
-    const urgency = row.urgency
-    const priorityLevel = derivePriority(urgency, impact)
+    // 배정은 이 시점에 first_response_at을 세팅하는 경로다 — 같은 시각을
+    // computeSlaFields의 firstResponseAt과 UPDATE의 assigned_at/first_response_at에
+    // 동일하게 사용해, "응답 기한을 이미 넘긴 채 배정되면 breach=true" 기존 동작을 보존한다.
+    const now = new Date()
 
-    // sla_policy에서 resolution_minutes 조회 (트랜잭션 내 읽기)
-    const policyRes = await tx.execute<{ id: number; resolution_minutes: number | null }>(
-      sql`select id, resolution_minutes from sla_policy where priority_level = ${priorityLevel}`,
-    )
-    const policy = policyRes.rows[0]
-
-    // resolution_due_at 계산
-    let resolutionDueAt: Date | null = null
-    if (policy && policy.resolution_minutes != null) {
-      const createdAt = new Date(row.created_at)
-      resolutionDueAt = addBusinessMinutes(createdAt, policy.resolution_minutes, holidaySet)
-    }
-
-    // response_due_at 조회 (배정 시점 기준 응답 기한)
-    const responsePolicyRes = await tx.execute<{ response_minutes: number | null }>(
-      sql`select response_minutes from sla_policy where priority_level = ${priorityLevel}`,
-    )
-    const responseMins = responsePolicyRes.rows[0]?.response_minutes ?? null
-    let responseDueAt: Date | null = null
-    if (responseMins != null) {
-      const createdAt = new Date(row.created_at)
-      responseDueAt = addBusinessMinutes(createdAt, responseMins, holidaySet)
-    }
-
-    // sla_response_breached: 배정이 응답 기한을 초과한 경우 true
-    const responseBreached = responseDueAt != null && new Date() > responseDueAt
+    const sla = await computeSlaFields({
+      tx,
+      urgency: row.urgency,
+      impact,
+      createdAt: row.created_at,
+      holidaySet,
+      firstResponseAt: now,
+    })
 
     // AND status = '접수' 로 낙관적 잠금: 동시 업데이트가 이미 상태를 바꿨다면 0행 리턴
     const upd = await tx.execute<{ id: number }>(sql`
@@ -86,14 +68,14 @@ export async function assignRequest({
       set
         assignee_id           = ${assigneeId},
         impact                = ${impact},
-        priority_level        = ${priorityLevel},
+        priority_level        = ${sla.priorityLevel},
         status                = '진행중',
-        assigned_at           = now(),
-        first_response_at     = now(),
-        response_due_at       = ${responseDueAt},
-        resolution_due_at     = ${resolutionDueAt},
-        sla_policy_id         = ${policy?.id ?? null},
-        sla_response_breached = ${responseBreached}
+        assigned_at           = ${now},
+        first_response_at     = ${now},
+        response_due_at       = ${sla.responseDueAt},
+        resolution_due_at     = ${sla.resolutionDueAt},
+        sla_policy_id         = ${sla.slaPolicyId},
+        sla_response_breached = ${sla.responseBreached}
       where id = ${reqId} and status = '접수'
       returning id
     `)

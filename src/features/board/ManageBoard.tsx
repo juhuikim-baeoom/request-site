@@ -17,7 +17,11 @@ import {
   STATUS_BADGE,
   ALLOWED_TRANSITIONS,
   WIP_LIMIT,
+  CLOSED_STATUSES,
   dueBadgeClass,
+  derivePriorityPreview,
+  withCurrentAssignee,
+  type Urgency,
 } from '../../lib/constants'
 import { fmtDateTime } from '../../lib/format'
 import type { PriorityLevel, RequestOrg, RequestStatus, RequestView } from '../../types/database'
@@ -39,12 +43,6 @@ type ViewMode = 'board' | 'list'
 // ---- 상수 ----
 const DUE_FILTERS = ['기한초과', '임박', '여유'] as const
 const IMPACT_OPTIONS: ImpactLevel[] = ['높음', '보통', '낮음']
-const IMPACT_PRIORITY_PREVIEW: Record<ImpactLevel, string> = {
-  높음: 'P1',
-  보통: 'P2',
-  낮음: 'P3/P4',
-}
-const CLOSED_STATUSES: RequestStatus[] = ['완료', '반려', '철회']
 
 // 저장뷰 localStorage 키
 const FILTER_STORAGE_KEY = 'manage_board_filters_v1'
@@ -99,6 +97,7 @@ function useToasts() {
 interface AssignModalProps {
   requestId: number
   title: string
+  urgency: Urgency
   selfId: string | null
   assigneeOptions: { id: string; name: string | null; email: string }[]
   onClose: () => void
@@ -108,6 +107,7 @@ interface AssignModalProps {
 function AssignModal({
   requestId,
   title,
+  urgency,
   selfId,
   assigneeOptions,
   onClose,
@@ -180,7 +180,7 @@ function AssignModal({
               ))}
             </div>
             <p className="mt-1 text-right text-[11px] text-gray-400">
-              예상 우선순위: <strong>{IMPACT_PRIORITY_PREVIEW[impact]}</strong>
+              예상 우선순위: <strong>{derivePriorityPreview(urgency, impact)}</strong>
             </p>
           </div>
         </div>
@@ -259,6 +259,7 @@ export function ManageBoard() {
   const [assignModal, setAssignModal] = useState<{
     id: number
     title: string
+    urgency: Urgency
   } | null>(null)
 
   // 벌크 선택
@@ -269,7 +270,8 @@ export function ManageBoard() {
 
   // 드래그 드롭 상태 (HTML5 dragover/drop API)
   const [dragId, setDragId] = useState<number | null>(null)
-  const [dragOverStatus, setDragOverStatus] = useState<RequestStatus | null>(null)
+  // 'queue' = 미배정 큐, RequestStatus = 칸반 컬럼 — 두 영역은 의미가 달라 별도로 하이라이트한다.
+  const [dragOverZone, setDragOverZone] = useState<'queue' | RequestStatus | null>(null)
 
   // 칸반 가로 팬
   const colsRef = useRef<HTMLDivElement>(null)
@@ -288,14 +290,6 @@ export function ManageBoard() {
   )
 
   const deferredQ = useDeferredValue(q)
-
-  const triageQueue = useMemo(
-    () =>
-      (rows ?? []).filter(
-        (r) => r.status === '접수' && !r.assignee_id,
-      ),
-    [rows],
-  )
 
   const filtered = useMemo(() => {
     const query = deferredQ.trim().toLowerCase()
@@ -327,10 +321,20 @@ export function ManageBoard() {
     })
   }, [rows, deferredQ, org, typeCode, due, assignee, showClosed, nameById])
 
+  // 미배정 큐도 filtered를 소스로 써야 필터(기관·담당 등)와 헤더 건수 표시가 일치한다.
+  // 접수는 종결 상태가 아니므로 showClosed 토글과 충돌하지 않는다.
+  const triageQueue = useMemo(
+    () => filtered.filter((r) => r.status === '접수' && !r.assignee_id),
+    [filtered],
+  )
+
+  // 접수 컬럼은 '배정된 접수 건'만 담는다.
+  // 미배정 접수 건은 상단 미배정 큐가 담당한다 (두 영역은 배타적 — 중복 표시 방지).
   const byStatus = useMemo(() => {
     const m = new Map<RequestStatus, typeof filtered>()
     for (const s of BOARD_STATUSES) m.set(s, [])
     for (const r of filtered) {
+      if (r.status === '접수' && !r.assignee_id) continue
       if (r.status && m.has(r.status as RequestStatus)) {
         m.get(r.status as RequestStatus)!.push(r)
       }
@@ -345,26 +349,28 @@ export function ManageBoard() {
     e.dataTransfer.setData('text/plain', String(id))
   }
 
-  function onDragOver(e: React.DragEvent, status: RequestStatus) {
+  function onDragOver(e: React.DragEvent, zone: 'queue' | RequestStatus) {
     e.preventDefault()
     const row = (rows ?? []).find((r) => r.id === dragId)
     if (!row || !row.status) return
+    const targetStatus: RequestStatus = zone === 'queue' ? '접수' : zone
     const allowed = ALLOWED_TRANSITIONS[row.status as RequestStatus] ?? []
-    if (status === row.status || allowed.includes(status)) {
+    if (targetStatus === row.status || allowed.includes(targetStatus)) {
       e.dataTransfer.dropEffect = 'move'
-      setDragOverStatus(status)
+      setDragOverZone(zone)
     } else {
       e.dataTransfer.dropEffect = 'none'
     }
   }
 
-  function onDrop(e: React.DragEvent, toStatus: RequestStatus) {
+  function onDrop(e: React.DragEvent, zone: 'queue' | RequestStatus) {
     e.preventDefault()
-    setDragOverStatus(null)
+    setDragOverZone(null)
     if (dragId == null) return
     const row = (rows ?? []).find((r) => r.id === dragId)
     if (!row || !row.status) return
     const fromStatus = row.status as RequestStatus
+    const toStatus: RequestStatus = zone === 'queue' ? '접수' : zone
     if (fromStatus === toStatus) return
     const allowed = ALLOWED_TRANSITIONS[fromStatus] ?? []
     if (!allowed.includes(toStatus)) {
@@ -373,7 +379,7 @@ export function ManageBoard() {
     }
     // 접수 → 진행중 드롭: 배정 필요
     if (fromStatus === '접수' && toStatus === '진행중') {
-      setAssignModal({ id: dragId, title: row.title ?? '' })
+      setAssignModal({ id: dragId, title: row.title ?? '', urgency: (row.urgency as Urgency | null) ?? '보통' })
       return
     }
     // 낙관적 업데이트
@@ -389,7 +395,7 @@ export function ManageBoard() {
 
   function onDragEnd() {
     setDragId(null)
-    setDragOverStatus(null)
+    setDragOverZone(null)
   }
 
   // ---- 칸반 팬 핸들러 ----
@@ -584,7 +590,7 @@ export function ManageBoard() {
             <span className="text-[10px] font-semibold text-red-500">SLA</span>
           )}
         </div>
-        {/* 담당자 인라인 */}
+        {/* 담당자 인라인 — 현재 담당자가 후보 목록 밖이어도 옵션에 포함해 select가 실제 값을 반영하게 한다 */}
         <div className="mt-2">
           <select
             aria-label="담당자"
@@ -593,9 +599,10 @@ export function ManageBoard() {
             onChange={(e) => r.id != null && handleAssigneeChange(r.id, e.target.value)}
           >
             <option value="">미배정</option>
-            {assigneeOptions.map((p) => (
+            {withCurrentAssignee(assigneeOptions, r.assignee_id, profiles ?? []).map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name ?? p.email}
+                {p.outsideCandidates ? ' (시스템팀 아님)' : ''}
               </option>
             ))}
           </select>
@@ -729,13 +736,27 @@ export function ManageBoard() {
 
       {/* ---- 트리아지 존 (미배정 큐) ---- */}
       {triageQueue.length > 0 && (
-        <div className="rounded-xl border-2 border-dashed border-amber-300 bg-amber-50/60 p-3">
+        <div
+          className={`rounded-xl border-2 border-dashed p-3 transition-colors ${
+            dragOverZone === 'queue'
+              ? 'border-brand bg-brand/5'
+              : 'border-amber-300 bg-amber-50/60'
+          }`}
+          onDragOver={(e) => onDragOver(e, 'queue')}
+          onDragLeave={() => setDragOverZone(null)}
+          onDrop={(e) => onDrop(e, 'queue')}
+        >
           <div className="mb-2 flex items-center gap-2">
             <span className="text-sm font-bold text-amber-800">미배정 큐</span>
             <span className="rounded-full bg-amber-200 px-2 py-0.5 text-xs font-bold text-amber-800 tabular-nums">
               {triageQueue.length}
             </span>
           </div>
+          {dragOverZone === 'queue' && (
+            <div className="mb-2 flex items-center justify-center rounded-lg border-2 border-dashed border-brand/40 py-4 text-xs text-brand">
+              여기에 놓기
+            </div>
+          )}
           <div className="flex flex-wrap gap-2">
             {triageQueue.map((r) => {
               const priorityLevel = r.priority_level as PriorityLevel | null
@@ -764,7 +785,14 @@ export function ManageBoard() {
                     <span>{r.type_label}</span>
                   </div>
                   <button
-                    onClick={() => r.id != null && setAssignModal({ id: r.id, title: r.title ?? '' })}
+                    onClick={() =>
+                      r.id != null &&
+                      setAssignModal({
+                        id: r.id,
+                        title: r.title ?? '',
+                        urgency: (r.urgency as Urgency | null) ?? '보통',
+                      })
+                    }
                     className="mt-0.5 w-full rounded-md bg-amber-500 py-1 text-xs font-semibold text-white hover:bg-amber-600"
                   >
                     배정
@@ -852,13 +880,13 @@ export function ManageBoard() {
           {BOARD_STATUSES.map((status) => {
             const cards = byStatus.get(status) ?? []
             const overWip = cards.length > WIP_LIMIT
-            const isDragTarget = dragOverStatus === status
+            const isDragTarget = dragOverZone === status
             return (
               <div
                 key={status}
                 className="w-64 shrink-0"
                 onDragOver={(e) => onDragOver(e, status)}
-                onDragLeave={() => setDragOverStatus(null)}
+                onDragLeave={() => setDragOverZone(null)}
                 onDrop={(e) => onDrop(e, status)}
               >
                 {/* 컬럼 헤더 */}
@@ -1047,8 +1075,11 @@ export function ManageBoard() {
                         }
                       >
                         <option value="">미배정</option>
-                        {assigneeOptions.map((p) => (
-                          <option key={p.id} value={p.id}>{p.name ?? p.email}</option>
+                        {withCurrentAssignee(assigneeOptions, r.assignee_id, profiles ?? []).map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.name ?? p.email}
+                            {p.outsideCandidates ? ' (시스템팀 아님)' : ''}
+                          </option>
                         ))}
                       </select>
                     </td>
@@ -1064,7 +1095,8 @@ export function ManageBoard() {
       )}
 
       <p className="text-xs text-gray-400">
-        칸반에서 카드를 드래그해 상태를 변경합니다. 미배정 큐에서 배정 후 진행중으로 이동됩니다.
+        칸반에서 카드를 드래그해 상태를 변경합니다. 미배정 큐에서 배정하면 진행중으로 이동하고,
+        진행중 카드를 접수 컬럼이나 미배정 큐에 놓으면 배정이 취소되어 미배정 큐로 돌아갑니다.
         보드는 빈 공간을 마우스로 잡아 좌우로 끌 수 있습니다.
       </p>
 
@@ -1073,6 +1105,7 @@ export function ManageBoard() {
         <AssignModal
           requestId={assignModal.id}
           title={assignModal.title}
+          urgency={assignModal.urgency}
           selfId={profile?.id ?? null}
           assigneeOptions={assigneeOptions}
           onClose={() => setAssignModal(null)}
