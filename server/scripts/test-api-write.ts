@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { buildApp } from '../src/app.js'
 import { db, pool } from '../src/db/client.js'
 import { requests, users } from '../src/db/schema.js'
-import { eq, sql } from 'drizzle-orm'
+import { eq, inArray, sql } from 'drizzle-orm'
 import { loginAsDev } from '../src/routes/helpers.js'
 
 const app = await buildApp()
@@ -163,6 +163,44 @@ await db.delete(requests).where(eq(requests.id, reqId))
   console.log('unassigned urgency edit ok: response_due_at만 재산정, impact/priority_level 미배정 유지')
 
   await db.delete(requests).where(eq(requests.id, unassignedId))
+}
+
+// ──────────────────────────────────────────
+// seq 채번 갭 내성 회귀 테스트 (마이그레이션 0008)
+// gen_seq()가 count(*)+1로 채번하면, 중간 행이 삭제돼 그 날짜 seq 번호열에 갭이 생겼을 때
+// 이미 존재하는 seq와 충돌(unique violation)해 POST /api/requests가 500이 되고, 재시도해도
+// 같은 숫자를 다시 계산하므로 그 날짜가 끝날 때까지 접수가 계속 실패한다.
+// max(마지막 번호)+1로 채번해야 갭이 있어도 항상 성공한다.
+// ──────────────────────────────────────────
+{
+  const mk = () => app.inject({
+    method: 'POST', url: '/api/requests', cookies,
+    payload: {
+      org: '공통', type_code: 'feature', urgency: '보통', visibility: 'dept',
+      title: 'seq갭테스트',
+      intake_detail: { purpose: '테스트', expected_effect: '테스트' },
+    },
+  })
+
+  const rA = await mk(); assert.equal(rA.statusCode, 201)
+  const rB = await mk(); assert.equal(rB.statusCode, 201)
+  const rC = await mk(); assert.equal(rC.statusCode, 201)
+  const idA = rA.json().id, idB = rB.json().id, idC = rC.json().id
+  const seqA = rA.json().seq, seqC = rC.json().seq
+
+  // 중간 행(B) 삭제 → 그 날짜 seq 번호열에 갭 발생
+  await db.delete(requests).where(eq(requests.id, idB))
+
+  // 갭이 있어도 새 접수는 성공해야 하고(500이 아님), 기존 seq와 충돌하지 않아야 한다
+  const rD = await mk()
+  assert.equal(rD.statusCode, 201, `갭 이후 접수 실패(회귀): ${JSON.stringify(rD.json())}`)
+  const idD = rD.json().id
+  const seqD = rD.json().seq
+  assert.notEqual(seqD, seqA, '갭 이후 채번이 기존 seq(A)와 충돌하지 않음')
+  assert.notEqual(seqD, seqC, '갭 이후 채번이 기존 seq(C)와 충돌하지 않음')
+  console.log(`seq gap regression ok: A=${seqA} (B 삭제) C=${seqC} D=${seqD}`)
+
+  await db.delete(requests).where(inArray(requests.id, [idA, idC, idD]))
 }
 
 await app.close(); await pool.end()
