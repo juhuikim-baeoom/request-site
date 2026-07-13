@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useUsers } from '../accounts/api'
-import { ALLOWED_TRANSITIONS, PRIORITY_LEVEL_BADGE } from '../../lib/constants'
+import { ALLOWED_TRANSITIONS, CLOSED_STATUSES, PRIORITY_LEVEL_BADGE } from '../../lib/constants'
 import type { PriorityLevel, RequestStatus } from '../../types/database'
 import { useChangeAssignee, useChangeStatus, useChangeImpact, type ImpactLevel } from './api'
 
@@ -38,6 +38,8 @@ export function AdminPanel({
   const [reason, setReason] = useState('')
 
   const allowed = ALLOWED_TRANSITIONS[status] ?? []
+  // 종결(완료·반려·철회) 요청은 영향도를 소급 조정할 수 없다 (server/src/services/impact.ts CLOSED와 동일 기준)
+  const isClosed = CLOSED_STATUSES.includes(status)
 
   function fail(err: unknown) {
     setError(err instanceof Error ? err.message : String(err))
@@ -158,7 +160,7 @@ export function AdminPanel({
             className={selectCls}
             value={impact ?? ''}
             onChange={(e) => onImpact(e.target.value as ImpactLevel)}
-            disabled={changeImpact.isPending || !assigneeId}
+            disabled={changeImpact.isPending || !assigneeId || isClosed}
           >
             <option value="" disabled>
               미정
@@ -171,6 +173,11 @@ export function AdminPanel({
           </select>
           {!assigneeId && (
             <p className="mt-1 text-[11px] text-gray-500">배정 후 조정할 수 있습니다.</p>
+          )}
+          {assigneeId && isClosed && (
+            <p className="mt-1 text-[11px] text-gray-500">
+              종결({status})된 요청은 영향도를 조정할 수 없습니다.
+            </p>
           )}
         </div>
       </div>
