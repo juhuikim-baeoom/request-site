@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### Changed
+- **`RequireRole`이 역할 배열 대신 능력 술어를 받도록 변경 — 능력→역할 매핑 드리프트 함정 제거** (`src/auth/RequireRole.tsx`, `src/routes.tsx`, `src/components/TopNav.tsx`, `src/lib/permissions.ts`): `TopNav.tsx`의 메뉴 `roles` 배열과 `routes.tsx`의 `RequireRole allow={[...]}`가 능력→역할 매핑을 `src/lib/permissions.ts`와 별도로 두 곳 더 복제하고 있어, 역할이 늘 때마다 세 곳을 다 고쳐야 하고 하나라도 빠뜨리면 메뉴 노출과 실제 접근 권한이 어긋날 수 있었다. `RequireRole`의 prop을 `allow: UserRole[]` → `can: (role) => boolean`으로 바꾸고 `routes.tsx`가 `canProcess`·`canSeeDashboard`·`canManageAccounts`를 직접 전달하도록 수정, `TopNav.tsx`의 `NAV_ITEMS`도 `roles` 배열 대신 같은 능력 함수를 참조하도록 변경했다. "요청 접수"·"내 요청"처럼 특정 능력이 아니라 "폐기되지 않은 로그인 역할 전부"에 노출하던 항목을 위해 `permissions.ts`에 `canAccessApp`(내부적으로 `constants.ts`의 `ASSIGNABLE_ROLES`를 참조)을 신설 — 이로써 능력→역할 매핑의 소스는 `src/lib/permissions.ts` 하나로 수렴한다. 노출 규칙 자체(요청 접수·내 요청=전 역할, 관리 보드=`canProcess`, 통계=`canSeeDashboard`, 계정 관리=`canManageAccounts`)는 변경 없음. 권한 경계는 여전히 서버(`server/src/authz.ts`)가 강제하며 이번 변경은 클라이언트 화면 노출 로직에만 영향을 준다. `grep -rn "RequireRole" src/`로 다른 사용처가 없음을 확인했다.
+  - docs sync: 화면 노출 규칙 불변(내부 리팩토링) — `docs/reference/requirements.md`·`docs/00-overview/index.md` 갱신 스킵.
+
 ### Fixed
 - **첨부 업로드 시 `comment_id` 소속 검증 누락 — 무결성 문제** (`server/src/routes/attachments.ts`, `server/scripts/test-attach-authz.ts`): 업로드 핸들러가 클라이언트가 보낸 `comment_id`를 그 댓글이 실제로 같은 요청(`request_id`) 소속인지 확인하지 않고 그대로 저장하고 있었다. A요청에 파일을 올리면서 B요청의 댓글 id를 붙일 수 있는 결함(정보 유출은 아님 — 첨부 조회가 `request_id`로 필터되어 남의 스레드에 노출되지 않고, 오히려 업로더 자신에게 안 보이게 될 뿐이지만 데이터 무결성 문제). `comment_id`가 non-null이면 `select id from request_comments where id = :commentId and request_id = :id`로 소속을 검증하고, 아니면 이 파일의 기존 관례(존재 여부 비노출을 위해 거부·부재 모두 404)에 맞춰 404로 거부하도록 수정. 회귀 테스트를 `test-attach-authz.ts`에 추가: 다른 요청의 댓글 id로 업로드 시 404, 같은 요청의 댓글 id는 201, `comment_id` 없는 첨부도 여전히 201.
 

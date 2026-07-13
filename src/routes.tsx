@@ -1,6 +1,7 @@
 import { createBrowserRouter, Navigate } from 'react-router-dom'
 import { Layout } from './components/Layout'
 import { RequireRole } from './auth/RequireRole'
+import { canProcess, canSeeDashboard, canManageAccounts } from './lib/permissions'
 import { LoginPage } from './pages/LoginPage'
 import { RequestForm } from './features/requests/RequestForm'
 import { MyRequests } from './features/requests/MyRequests'
@@ -34,7 +35,7 @@ export const router = createBrowserRouter([
       {
         path: 'board',
         element: (
-          <RequireRole allow={['system', 'system_admin']}>
+          <RequireRole can={canProcess}>
             <ManageBoard />
           </RequireRole>
         ),
@@ -43,7 +44,7 @@ export const router = createBrowserRouter([
       {
         path: 'dashboard',
         element: (
-          <RequireRole allow={['system', 'system_admin', 'exec']}>
+          <RequireRole can={canSeeDashboard}>
             <Dashboard />
           </RequireRole>
         ),
@@ -52,7 +53,7 @@ export const router = createBrowserRouter([
       {
         path: 'accounts',
         element: (
-          <RequireRole allow={['system_admin']}>
+          <RequireRole can={canManageAccounts}>
             <Accounts />
           </RequireRole>
         ),
