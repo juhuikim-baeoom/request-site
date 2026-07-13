@@ -8,6 +8,7 @@ import {
   withCurrentAssignee,
   type Urgency,
 } from '../../lib/constants'
+import { canProcess } from '../../lib/permissions'
 import type { PriorityLevel, RequestStatus } from '../../types/database'
 import { useChangeAssignee, useChangeStatus, useChangeImpact, type ImpactLevel } from './api'
 
@@ -38,12 +39,12 @@ export function AdminPanel({
   urgency,
 }: AdminPanelProps) {
   const { data: allUsers } = useUsers()
-  // 담당자 후보는 시스템팀만 — ManageBoard.tsx의 assigneeOptions와 규칙을 일치시킨다.
-  // (일반 staff를 배정하면 공개범위 필터가 assignee_id를 열람 근거로 쓰지 않아 본인이 못 볼 수 있음)
-  const systemUsers = (allUsers ?? []).filter((u) => u.role === 'system')
-  // 현재 담당자가 시스템팀이 아니어도(예: 배정 이후 역할 변경) select 후보에 편입해
+  // 담당자 후보는 처리 능력(canProcess) 보유자만 — ManageBoard.tsx의 assigneeOptions와 규칙을 일치시킨다.
+  // (canProcess가 없는 사용자를 배정하면 공개범위 필터가 assignee_id를 열람 근거로 쓰지 않아 본인이 못 볼 수 있음)
+  const processUsers = (allUsers ?? []).filter((u) => canProcess(u.role))
+  // 현재 담당자가 처리 능력 보유자가 아니어도(예: 배정 이후 역할 변경) select 후보에 편입해
   // value가 실제 담당자와 항상 일치하도록 한다 — ManageBoard.tsx와 같은 규칙(withCurrentAssignee).
-  const users = withCurrentAssignee(systemUsers, assigneeId, allUsers ?? [])
+  const users = withCurrentAssignee(processUsers, assigneeId, allUsers ?? [])
   const changeAssignee = useChangeAssignee()
   const changeStatus = useChangeStatus()
   const changeImpact = useChangeImpact(requestId)

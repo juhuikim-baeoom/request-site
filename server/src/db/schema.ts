@@ -4,7 +4,15 @@ import {
 } from 'drizzle-orm/pg-core'
 import { sql } from 'drizzle-orm'
 
-export const userRole = pgEnum('user_role', ['staff', 'system', 'viewer'])
+export const userRole = pgEnum('user_role', [
+  'staff',
+  'system',
+  'viewer', // 폐기 — 신규 부여 금지. 기존 행 호환을 위해 값만 유지한다.
+  'dept_monitor',
+  'org_monitor',
+  'exec',
+  'system_admin',
+])
 export const requestOrg = pgEnum('request_org', ['배움', '배론', '허브', '공통'])
 export const requestStatus = pgEnum('request_status', [
   '접수', '진행중', '보류', '완료', '반려', '철회',
@@ -177,6 +185,14 @@ export const notifications = pgTable('notifications', {
 }, (t) => ({
   userReadIdx: index('idx_notifications_user_read').on(t.userId, t.isRead),
 }))
+
+// 백필(server/src/db/backfill-roles.ts)이 최초 1회만 실행되도록 남기는 이력 마커.
+// backfillKey를 원자적으로 claim(INSERT ... ON CONFLICT DO NOTHING)해, 이미 적용된 DB에서는
+// 재실행해도 UPDATE 자체를 건너뛴다 — 관리자가 수동으로 바꾼 역할이 되살아나지 않게 하기 위함.
+export const roleBackfillHistory = pgTable('role_backfill_history', {
+  backfillKey: text('backfill_key').primaryKey(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
 
 export const requestSharedTargets = pgTable('request_shared_targets', {
   id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),

@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { sql } from 'drizzle-orm'
 import { db, withUser } from '../db/client.js'
 import { authenticate } from '../auth/session.js'
-import { visibilityFilter, isSystem } from '../authz.js'
+import { visibilityFilter, canProcess } from '../authz.js'
 import { parseId, isOneOf, ORGS, TYPE_CODES, PRIORITIES, VISIBILITIES } from '../http.js'
 import { changeStatus, TransitionError } from '../services/transition.js'
 import { assignRequest, AssignError } from '../services/assign.js'
@@ -131,7 +131,7 @@ export async function requestRoutes(app: FastifyInstance) {
     if (!row) { reply.code(404); return { error: 'not found' } }
 
     const isOwner = row.requester_id === u.id
-    const sys = isSystem(u)
+    const sys = canProcess(u)
 
     // 상태 변경은 changeStatus()를 통해서만
     if (b.status !== undefined) {
@@ -237,7 +237,7 @@ export async function requestRoutes(app: FastifyInstance) {
   // 미배정 건 배정 (system 전용)
   app.post<{ Params: { id: string }; Body: any }>('/api/requests/:id/assign', async (request, reply) => {
     const u = request.currentUser!
-    if (!isSystem(u)) { reply.code(403); return { error: 'forbidden' } }
+    if (!canProcess(u)) { reply.code(403); return { error: 'forbidden' } }
 
     const id = parseId(request.params.id)
     if (id === null) { reply.code(404); return { error: 'not found' } }
@@ -265,7 +265,7 @@ export async function requestRoutes(app: FastifyInstance) {
     '/api/requests/:id/impact',
     async (request, reply) => {
       const u = request.currentUser!
-      if (!isSystem(u)) { reply.code(403); return { error: 'forbidden' } }
+      if (!canProcess(u)) { reply.code(403); return { error: 'forbidden' } }
 
       const id = parseId(request.params.id)
       if (id === null) { reply.code(404); return { error: 'not found' } }

@@ -7,6 +7,28 @@ import type {
   RequestTypeCode,
 } from '../types/database'
 
+// 역할 한국어 라벨 — 계정 관리·상단 메뉴가 공유한다.
+// 내부값은 서버 user_role enum과 동일해야 한다.
+export const ROLE_LABEL: Record<string, string> = {
+  staff: '요청자',
+  dept_monitor: '부서 모니터링 관리자',
+  org_monitor: '기관 모니터링 관리자',
+  system: '시스템팀 담당자',
+  exec: '경영진',
+  system_admin: '시스템팀 관리자',
+  viewer: '(폐기) 뷰어',
+}
+
+// 계정 관리 역할 select에 노출할 역할 (폐기값 viewer 제외)
+export const ASSIGNABLE_ROLES = [
+  'staff',
+  'dept_monitor',
+  'org_monitor',
+  'system',
+  'exec',
+  'system_admin',
+] as const
+
 // 기관 (request_org enum)
 export const ORG_OPTIONS: RequestOrg[] = ['배움', '배론', '허브', '공통']
 

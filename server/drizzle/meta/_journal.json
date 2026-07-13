@@ -36,6 +36,20 @@
       "when": 1783812791400,
       "tag": "0004_fix_due_status_labels",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1784000000010,
+      "tag": "0005_role_model_add_values",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1784000000020,
+      "tag": "0006_role_backfill_history",
+      "breakpoints": true
     }
   ]
 }

@@ -1,6 +1,6 @@
 ---
 title: DB 스키마 설계 (Drizzle + Postgres)
-last_updated: 2026-07-12
+last_updated: 2026-07-13
 status: Active
 owner: 시스템팀
 diataxis: reference
@@ -20,7 +20,7 @@ source_of_truth: server/src/db/schema.ts, server/drizzle/0001_triggers.sql
 
 | 테이블 | 역할 | 핵심 |
 | --- | --- | --- |
-| `users` | 직원 계정·역할·소속 | role = staff / system / viewer |
+| `users` | 직원 계정·역할·소속 | role = staff / system / viewer(폐기) / dept_monitor / org_monitor / exec / system_admin |
 | `sessions` | 서버 세션 | 쿠키는 랜덤 토큰만 저장, 로그아웃·무효화 가능 |
 | `org_directory` | 조직도 사전등록 | synced 여부로 계정 생성 연동 |
 | `request_types` | 요청 유형 코드 | 오류 / 기능요청 / 데이터추출 / 파일변경 |
@@ -31,6 +31,7 @@ source_of_truth: server/src/db/schema.ts, server/drizzle/0001_triggers.sql
 | `request_status_history` | 상태 변경 이력 | 트리거 자동 기록, changed_by = app.user_id |
 | `request_attachments` | 첨부 메타 | commentId(nullable) 연결 가능 |
 | `request_shared_targets` | 공유 대상 | visibility='shared'일 때 대상 목록 |
+| `role_backfill_history` | 백필 적용 이력 마커 | `backfill_key` PK — `server/src/db/backfill-roles.ts`가 최초 1회만 실행되도록 원자적으로 claim |
 
 관계: `requests` 1→N `comments` / `history` / `attachments` / `shared_targets`.
 `requests.parent_request_id`로 하위건 자기참조 연결.
@@ -47,7 +48,30 @@ source_of_truth: server/src/db/schema.ts, server/drizzle/0001_triggers.sql
 | `request_org` | 배움 / 배론 / 허브 / 공통 |
 | `request_source` | web / email |
 | `request_visibility` | private / dept / function / org / shared |
-| `user_role` | staff / system / viewer |
+| `user_role` | staff / system / viewer(폐기, 신규 부여 금지) / dept_monitor / org_monitor / exec / system_admin |
+
+`user_role`은 `server/drizzle/0005_role_model_add_values.sql`(`ALTER TYPE ... ADD VALUE`)에서
+`dept_monitor`·`org_monitor`·`exec`·`system_admin` 4종을 추가했다. 기존 DB의 데이터 이전
+(`viewer`→`exec`, `juhuikim@baeoom.com`→`system_admin`)은 마이그레이션 파일이 아니라
+`server/src/db/backfill-roles.ts`의 백필로 구현되어 있다(이유는 §10 교훈 참조). `viewer` 값
+자체는 Postgres가 enum 값 제거를 지원하지 않아 forward-only로 남겨두되 신규 부여는 하지 않는다.
+
+이 백필은 **최초 1회만 실행**된다. `server/drizzle/0006_role_backfill_history.sql`이 만든
+`role_backfill_history` 테이블에 고정 키(`role_model_v1`)를 원자적으로 claim(`INSERT ... ON
+CONFLICT DO NOTHING RETURNING`)하고, claim에 성공했을 때만 실제 UPDATE를 수행한다. `migrate.ts`는
+`npm run db:migrate`(= 배포)마다 백필 함수를 호출하지만, 이미 적용된 DB에서는 claim이 0행을
+반환해 UPDATE 자체를 건너뛰므로 관리자가 계정 관리 화면에서 수동으로 바꾼 역할이 다음 배포에서
+되살아나지 않는다.
+
+**깨끗한 DB의 최초 관리자는 백필이 아니라 `server/src/db/seed.ts`가 직접 만든다** —
+`db:seed`가 `juhuikim@baeoom.com`을 처음부터 `role='system_admin'`으로 삽입한다(이전에는
+`role='system'`으로 삽입해, 빈 DB에 공식 순서(`db:migrate` → `db:seed`)를 따르면 백필이
+0행 UPDATE로 마커만 claim하고 seed가 `system`을 넣어 `system_admin`이 영구히 0명이 되는
+결함이 있었다 — §10 교훈 3 참조). `backfill-roles.ts`는 이 seed 수정 이전에 이미 배포되어
+`role='system'`으로 존재하는 기존 DB를 위한 이전 경로로 계속 남는다.
+
+이 6개 역할에 대한 접근 제어(authz)는 `server/src/authz.ts`(서버)·`src/lib/permissions.ts`
+(클라이언트 사본)의 능력(capability) 기반 판정으로 구현되어 있다. 아래 §8을 참조.
 
 ---
 
@@ -136,23 +160,78 @@ Google OAuth 연동, `@baeoom.com`/`@baeron.com` 도메인 제한.
 
 ## 8. 접근 제어
 
-RLS 없음 (Fastify 백엔드에서 역할 판정).
+RLS 없음 (Fastify 백엔드에서 역할 판정). 라우트는 역할 이름 대신 능력(capability)을
+묻는다 — 역할이 늘어도 호출부를 고치지 않기 위함이다. 정의: `server/src/authz.ts`
+(서버, source of truth) · `src/lib/permissions.ts`(클라이언트 사본, 화면 노출 편의용 —
+실제 권한 경계는 서버가 강제). 옛 `isSystem`·`isViewerUp` 헬퍼는 제거됐다.
 
-| 역할 | requests 읽기 | 등록 | 상태·담당 변경 | 삭제 |
-| --- | --- | --- | --- | --- |
-| staff | 본인 + 공개범위 해당분 | 본인 명의로 | 불가 | 불가 |
-| system | 전체 | 가능 | 가능 | 가능 |
-| viewer | 전체 | 불가 | 불가 | 불가 |
+**능력별 허용 역할**
 
-**공개범위(visibility)**
+| 능력 | 의미 | 허용 역할 |
+| --- | --- | --- |
+| `canProcess` | 배정·상태전이·영향도 조정·필드편집·내부메모 작성 | system · system_admin |
+| `canManageAccounts` | 계정·역할 변경, 조직도 import | system_admin |
+| `canSeeDashboard` | 통계 대시보드 열람 | system · system_admin · exec |
+| `canSeeInternal` | 내부메모 열람(본문 + 첨부파일) | system · system_admin |
+| `canSeeAllRequests` | 공개범위와 무관하게 전 요청 열람 | system · system_admin · exec |
+
+`staff`·`dept_monitor`·`org_monitor`와 폐기값 `viewer`는 위 5개 능력이 모두 false다
+(화이트리스트 방식 — 알 수 없는/폐기된 역할은 최소 권한).
+
+**공개범위(visibility) + 모니터링 열람 범위**
+
+`canSeeAllRequests` 역할(system·system_admin·exec)은 공개범위와 무관하게 전체 열람.
+그 외에는 아래 visibility 규칙에 더해, 모니터링 관리자가 본인 소속에서 도출한 범위를
+추가로 본다: `dept_monitor` = 같은 기관 **+** 같은 직무, `org_monitor` = 같은 기관
+전체. 본인의 `org_affil`/`dept_function`이 null이면 추가 범위 없음(false로 안전 처리).
 
 | visibility | 볼 수 있는 사람 |
 | --- | --- |
-| private | 본인 + system |
-| dept | 본인 + 같은 부서 + system |
-| function | 본인 + 같은 function + system |
-| org | 본인 + 같은 기관 + system |
+| private | 본인 + canSeeAllRequests 역할 |
+| dept | 본인 + 같은 기관·직무 + canSeeAllRequests 역할 |
+| function | 본인 + 같은 function + canSeeAllRequests 역할 |
+| org | 본인 + 같은 기관 + canSeeAllRequests 역할 |
 | shared | 전 직원 (shared_targets 참조) |
+
+목록 조회 시 위 판정은 `visibilityFilter()`가 SQL WHERE 절로, 단건 조회 시
+`canSeeRequest()`가 동일 규칙을 애플리케이션 레벨로 이식한다. 댓글의 내부메모
+(`is_internal=true`)는 `canSeeComment()`가 별도 판정 — `canSeeInternal` 역할이거나
+작성자 본인일 때만 보인다(첨부파일 목록·다운로드도 동일 규칙 공유).
+
+첨부파일 목록·다운로드 게이트는 **fail-closed**다: 첨부의 `comment_id`가 non-null인데(내부메모에
+딸린 첨부) 조인·조회된 댓글 행을 찾지 못하면 "공개"로 fail-open 처리하지 않고 목록에서 제외·
+다운로드를 거부(404)한다. 다운로드 라우트(`GET /api/attachments/:id/download`)는 첨부 조회와
+댓글 조회가 별도의 두 쿼리라 그 사이에 댓글이 삭제되면 TOCTOU(check-then-act) 레이스가 생길 수
+있는데, 이번 수정이 실제로 닫는 것은 이 창이다. 목록 라우트(`GET /api/requests/:id/attachments`)는
+단일 `LEFT JOIN` 쿼리라 같은 레이스는 없지만, 두 경로의 동작을 일치시키기 위해 동일한 fail-closed
+규칙을 적용했다. `comment_id`가 애초에 null인 요청 본문 첨부는 그대로 노출된다(과잉 차단 아님).
+
+업로드 시점(`POST /api/requests/:id/attachments`)에도 `comment_id`가 non-null이면 그 댓글이
+실제로 같은 요청(`request_id`) 소속인지 검증한다 — 검증 없이 그대로 저장하면 A요청에 파일을
+올리면서 B요청의 댓글 id를 붙일 수 있었다(정보 유출은 아님 — 첨부 조회가 `request_id`로 필터되므로
+남의 스레드에 노출되지 않고, 오히려 업로더 자신에게도 안 보이게 될 뿐이지만 무결성 문제). 소속이
+아니면 이 라우트의 기존 관례대로 404로 거부한다.
+
+**잔여 위험(중요)**: `request_attachments.comment_id`의 FK는 `onDelete: 'set null'`이다. 즉 댓글이
+삭제되면 그 첨부의 `comment_id`는 "댓글 행을 찾을 수 없는 상태"가 아니라 **NULL로 바뀐다.** 위
+fail-closed 필터의 첫 분기는 `comment_id`가 null이면 요청 본문 첨부로 간주해 통과시키므로, **댓글
+삭제 기능이 추가되는 순간 삭제된 내부메모의 첨부는 그 분기를 타고 전 역할에 공개된다.** 이번
+수정은 이 상태를 막지 않는다 — 막는 것은 어디까지나 "`comment_id`는 있는데 댓글 행이 없는" 순간의
+TOCTOU 창뿐이다. 현재는 댓글 삭제 라우트가 없어(`app.delete` 라우트 0개) 실사용 경로가 없으며,
+회귀 테스트(`server/scripts/test-attach-authz.ts`)가 `SET LOCAL session_replication_role = replica`로
+FK 자체를 우회해야만 그 orphan 상태를 재현할 수 있었다는 점이 이를 뒷받침한다(FK가 정상 동작하는
+한 그 상태는 스스로 발생하지 않는다). **댓글 삭제 기능을 추가할 때는** 그 댓글에 딸린 첨부도 함께
+삭제(cascade)하거나, `request_attachments`에 `is_internal`을 비정규화해 `comment_id`가 NULL이 되어도
+내부메모 여부를 판별할 수 있게 하는 등의 대책이 반드시 필요하다.
+
+`GET /api/profiles`(계정 디렉터리: id·name·email·role·소속)는 `GET /api/users`와 동일하게
+`canProcess` 전용이다 — 유일한 소비자(관리 보드 담당자 select)가 `canProcess` 화면이기
+때문이며, 그렇지 않으면 `GET /api/users`를 `canProcess`로 좁힌 경계가 이쪽으로 우회된다.
+
+회귀 테스트: `server/scripts/test-authz.ts`(`npm run test:authz`, 역할×능력 매트릭스 +
+모니터링 열람 범위), `server/scripts/test-role-boundaries.ts`(`npm run test:roles`,
+API 레벨 권한 경계 — `GET /api/profiles` 포함), `server/scripts/test-attach-authz.ts`
+(`npm run test:attach-authz`, 내부메모 첨부 차단 + fail-closed 동작).
 
 ---
 
@@ -170,9 +249,16 @@ Greenfield(데이터 없음) 재생성 방식.
 
 ```
 docker compose down -v && docker compose up -d
-npm run db:migrate   # drizzle/0000_*.sql + 0001_triggers.sql
-npm run db:seed      # request_types / users / sla_policy / holidays
+npm run db:migrate   # drizzle/0000_*.sql + 0001_triggers.sql (+ 역할 백필, system_admin 0명이면 경고)
+npm run db:seed      # request_types / users / sla_policy / holidays (system_admin 0명이면 실패)
 npm run db:smoke     # seq 생성·상태이력·뷰 조회 검증
+npm run test:bootstrap  # 별도 임시 DB에서 위 순서를 재현해 system_admin >= 1을 검증(회귀 테스트)
 ```
 
 enum 값 변경 필요 시 drizzle 파일 전체 재생성 후 DB 초기화.
+
+**교훈 1**: `ALTER TYPE ... ADD VALUE`로 추가한 enum 값은 같은 트랜잭션 안에서 사용(SELECT/UPDATE 등)할 수 없다. drizzle-orm 마이그레이터(`drizzle-orm/node-postgres/migrator`)는 대기 중인 모든 마이그레이션 파일을 단일 트랜잭션으로 묶어 실행하므로, 값 추가와 그 값을 쓰는 데이터 이전을 파일만 나눠서는 우회할 수 없다 — **값 추가는 마이그레이션, 그 값을 쓰는 데이터 이전은 `migrate()` 완료(트랜잭션 커밋) 후 실행되는 백필**(예: `server/src/db/backfill-roles.ts`, `server/src/db/migrate.ts`에서 호출)로 분리한다.
+
+**교훈 2**: 위 백필은 `migrate.ts`가 `npm run db:migrate`(= 배포)마다 호출한다. 백필이 조건절(`WHERE role='viewer'` 등)만으로 멱등을 흉내 내면, 그 조건이 "이메일 == 특정 값"처럼 사용자가 이후에 임의로 바꿀 수 있는 값을 대상으로 할 때 문제가 생긴다 — 관리자가 화면에서 역할을 바꿔도 다음 배포에서 조건이 다시 참이 되어 백필이 그 값을 조용히 덮어쓴다. 그래서 백필은 **적용 여부 자체를 별도 이력 테이블(`role_backfill_history`, `server/drizzle/0006_role_backfill_history.sql`)에 원자적으로 기록**하고, 이미 적용됐으면(= 이력에 키가 존재하면) 대상 조건과 무관하게 무조건 스킵한다. "재실행해도 안전"(idempotent)과 "최초 1회만 실행"(one-shot)은 다른 요구사항이며, 이후 사람이 수정할 수 있는 데이터를 다루는 백필은 후자를 만족해야 한다.
+
+**교훈 3**: "최초 1회만 실행"(교훈 2)과 "깨끗한 DB에서 항상 성립해야 하는 불변조건"은 또 다른 문제다. `seed.ts`가 한동안 `juhuikim@baeoom.com`을 `role='system'`으로 삽입했는데, 공식 배포 순서(`db:migrate` → `db:seed`)를 빈 DB에 그대로 따르면: (1) `db:migrate`의 백필이 아직 비어 있는 `users`에 대해 0행 UPDATE를 실행하고도 `role_backfill_history` 마커는 정상 claim·커밋 — "최초 1회" 규칙을 정확히 지켰지만, (2) 뒤이은 `db:seed`가 `system`으로 juhuikim을 삽입 — 이후 백필은 영원히 스킵되므로 **`system_admin`이 0명으로 고정**된다. `canManageAccounts`(=system_admin 전용)로 게이트된 `PATCH /api/users/:id`·조직도 import가 이 상태를 앱 안에서 복구할 방법을 제공하지 않아 DB 직접 SQL 없이는 회복 불가능했다. 교훈: **부트스트랩이 만들어야 하는 불변조건("관리자 ≥ 1명")은 백필의 멱등성/일회성 보장과 별개로, 그 불변조건이 실제로 성립하는 시점(여기서는 seed 완료 후) 직후 명시적으로 검증**해야 한다 — `seed.ts`는 `system_admin` 카운트가 0이면 실패(`process.exit(1)`)하고, `migrate.ts`는 (seed 이전 시점이라 0이 정상일 수 있으므로) 경고만 남긴다(`server/src/db/admin-check.ts`). 회귀 테스트 `server/scripts/test-bootstrap-clean-db.ts`(`npm run test:bootstrap`)는 같은 Postgres 서버 위에 임시 DB를 만들어 `db:migrate`+`db:seed`를 그대로 재현하고 `system_admin >= 1`을 단언한다.

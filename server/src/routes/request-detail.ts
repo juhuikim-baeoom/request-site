@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { sql } from 'drizzle-orm'
 import { db, withUser } from '../db/client.js'
 import { authenticate } from '../auth/session.js'
-import { canSeeRequest, isSystem, canSeeComment } from '../authz.js'
+import { canSeeRequest, canProcess, canSeeComment } from '../authz.js'
 import { parseId } from '../http.js'
 import type { CurrentUser } from '../types.js'
 import { notify } from '../services/notify.js'
@@ -89,7 +89,7 @@ export async function requestDetailRoutes(app: FastifyInstance) {
 
       // is_internal: 시스템팀만 true 가능. staff가 true 요청하면 false로 강제
       const wantsInternal = request.body?.is_internal === true
-      const isInternal = wantsInternal && isSystem(u)
+      const isInternal = wantsInternal && canProcess(u)
 
       // reqMeta 조회를 withUser 트랜잭션 안에서 수행해 TOCTOU 방지
       // (INSERT 시점의 최신 assignee를 읽음)
@@ -109,7 +109,7 @@ export async function requestDetailRoutes(app: FastifyInstance) {
       // 공개 댓글인 경우에만 알림 발송
       if (!isInternal && reqRow) {
         const seq = reqRow.seq ?? String(id)
-        const actorIsSystem = isSystem(u)
+        const actorIsSystem = canProcess(u)
         // 행위자가 시스템/담당이면 requester에게, 행위자가 requester이면 assignee에게
         if (actorIsSystem || reqRow.assignee_id === u.id) {
           // 시스템팀 또는 담당자가 댓글 → requester에게 알림
@@ -147,9 +147,25 @@ export async function requestDetailRoutes(app: FastifyInstance) {
     if (id === null) { reply.code(404).send({ error: 'not found' }); return }
     const { found, ok } = await loadForSee(u, id)
     if (!guard(reply, found, ok)) return
+    // 댓글에 딸린 첨부는 그 댓글의 내부메모 여부·작성자를 함께 읽어와
+    // canSeeComment와 동일한 규칙으로 필터링한다(본문을 감추면서 첨부만 새는 것 방지)
     const r = await db.execute<any>(sql`
-      select * from request_attachments where request_id = ${id} order by created_at asc`)
+      select a.*, c.is_internal as _comment_is_internal, c.author_id as _comment_author_id
+      from request_attachments a
+      left join request_comments c on c.id = a.comment_id
+      where a.request_id = ${id} order by a.created_at asc`)
     return r.rows
+      .filter((row: any) => {
+        // comment_id가 없는 일반(요청 본문) 첨부는 그대로 노출한다.
+        if (row.comment_id == null) return true
+        // comment_id는 있는데 조인된 댓글 행이 없다(예: 댓글 삭제로 comment_id가
+        // set null되기 전 시점의 레이스, 또는 이후 댓글 삭제 기능이 생겼을 때) —
+        // is_internal은 NOT NULL이므로 null이면 조인 실패를 의미한다. fail-open으로
+        // "공개"라고 간주하지 않고 fail-closed로 목록에서 제외한다.
+        if (row._comment_is_internal == null) return false
+        return canSeeComment(u, { isInternal: row._comment_is_internal, authorId: row._comment_author_id ?? null })
+      })
+      .map(({ _comment_is_internal, _comment_author_id, ...att }: any) => att)
   })
 
   // CSAT 제출 (요청자 전용, status='완료'일 때)

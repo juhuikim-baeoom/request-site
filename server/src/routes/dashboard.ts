@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { sql } from 'drizzle-orm'
 import { db } from '../db/client.js'
 import { authenticate } from '../auth/session.js'
-import { isViewerUp } from '../authz.js'
+import { canSeeDashboard } from '../authz.js'
 
 /** YYYY-MM-DD 형식 검증 */
 function isValidDate(s: string): boolean {
@@ -16,7 +16,7 @@ export async function dashboardRoutes(app: FastifyInstance) {
     '/api/dashboard/metrics',
     async (request, reply) => {
       const u = request.currentUser!
-      if (!isViewerUp(u)) {
+      if (!canSeeDashboard(u)) {
         reply.code(403)
         return { error: 'forbidden' }
       }

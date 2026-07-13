@@ -24,6 +24,7 @@ import {
   type Urgency,
 } from '../../lib/constants'
 import { fmtDateTime } from '../../lib/format'
+import { canProcess } from '../../lib/permissions'
 import type { PriorityLevel, RequestOrg, RequestStatus, RequestView } from '../../types/database'
 import {
   useAllProfiles,
@@ -285,7 +286,7 @@ export function ManageBoard() {
     return m
   }, [profiles])
   const assigneeOptions = useMemo(
-    () => (profiles ?? []).filter((p) => p.role === 'system'),
+    () => (profiles ?? []).filter((p) => canProcess(p.role)),
     [profiles],
   )
 

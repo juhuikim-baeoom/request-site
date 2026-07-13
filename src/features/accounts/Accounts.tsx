@@ -2,13 +2,9 @@ import { useRef, useState } from 'react'
 import { useUsers, useUpdateUser, useImportOrgDirectory } from './api'
 import type { UserRow, UpdateUserInput, OrgDirectoryRow } from './api'
 import type { UserRole, RequestOrg } from '../../types/database'
-import { ORG_OPTIONS } from '../../lib/constants'
-
-const ROLE_OPTIONS: { value: UserRole; label: string }[] = [
-  { value: 'staff', label: '일반직원' },
-  { value: 'system', label: '시스템팀' },
-  { value: 'viewer', label: '열람' },
-]
+import { ORG_OPTIONS, ROLE_LABEL, ASSIGNABLE_ROLES } from '../../lib/constants'
+import { useAuth } from '../../auth/useAuth'
+import { canManageAccounts, canProcess } from '../../lib/permissions'
 
 const ORG_LABEL: Record<RequestOrg, string> = {
   배움: '배움',
@@ -36,10 +32,15 @@ function UserRow({
 
   function handleSave() {
     const patch: UpdateUserInput = {
-      role: draft.role,
       dept: draft.dept ?? null,
       org_affil: draft.org_affil ?? null,
       dept_function: draft.dept_function ?? null,
+    }
+    // role은 실제로 바뀐 경우에만 담는다. 폐기값(viewer)은 ASSIGNABLE_ROLES에
+    // 없어 select가 그 값을 옵션으로 제공하지 않으므로, 관리자가 역할을 건드리지
+    // 않고 부서·소속기관만 고치려 할 때 항상 role을 보내면 서버가 400을 반환한다.
+    if (draft.role !== user.role) {
+      patch.role = draft.role
     }
     updateUser.mutate(patch, {
       onSuccess: () => {
@@ -64,14 +65,14 @@ function UserRow({
         <td className="px-3 py-2.5 text-sm">
           <span
             className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${
-              user.role === 'system'
+              canProcess(user.role)
                 ? 'bg-indigo-100 text-indigo-700'
-                : user.role === 'viewer'
+                : !(ASSIGNABLE_ROLES as readonly string[]).includes(user.role)
                   ? 'bg-amber-100 text-amber-700'
                   : 'bg-gray-100 text-gray-600'
             }`}
           >
-            {ROLE_OPTIONS.find((r) => r.value === user.role)?.label ?? user.role}
+            {ROLE_LABEL[user.role] ?? user.role}
           </span>
         </td>
         <td className="px-3 py-2.5 text-sm">
@@ -141,9 +142,17 @@ function UserRow({
           className="w-full rounded border border-gray-300 px-2 py-1 text-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
           aria-label="역할"
         >
-          {ROLE_OPTIONS.map((r) => (
-            <option key={r.value} value={r.value}>
-              {r.label}
+          {/* 폐기값(viewer) 등 신규 부여 불가 역할이 현재 값이면, select가 실제 값을
+              표시할 수 있도록 비활성 옵션으로 임시 추가한다. 관리자가 목록에서 정상
+              역할을 골라 저장하면 이 옵션은 사라지고 구제(role 변경)가 완료된다. */}
+          {!(ASSIGNABLE_ROLES as readonly string[]).includes(draft.role ?? '') && draft.role && (
+            <option value={draft.role} disabled>
+              {ROLE_LABEL[draft.role] ?? draft.role} (폐기값 — 아래에서 새 역할 선택 필요)
+            </option>
+          )}
+          {ASSIGNABLE_ROLES.map((r) => (
+            <option key={r} value={r}>
+              {ROLE_LABEL[r]}
             </option>
           ))}
         </select>
@@ -252,7 +261,8 @@ function CsvImportPanel() {
       </h2>
       <p className="mb-3 text-xs text-gray-500">
         헤더: <code className="rounded bg-gray-100 px-1">email,name,dept,org_affil,dept_function,role</code>
-        &nbsp;(dept_function·role 은 선택). org_affil: 배움/배론/허브/공통, role: staff/system/viewer.
+        &nbsp;(dept_function·role 은 선택). org_affil: 배움/배론/허브/공통, role:
+        staff/dept_monitor/org_monitor/system/exec/system_admin (viewer는 폐기값 — 신규 부여 불가).
       </p>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -340,7 +350,17 @@ function CsvImportPanel() {
 
 // ---------- 메인 ----------
 export function Accounts() {
-  const { data: users, isLoading, isError, refetch } = useUsers()
+  const { profile } = useAuth()
+  const allowed = canManageAccounts(profile?.role)
+  const { data: users, isLoading, isError, refetch } = useUsers(allowed)
+
+  if (!allowed) {
+    return (
+      <div className="p-8 text-center text-gray-500" role="status">
+        계정 관리 권한이 없습니다.
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6">
@@ -348,7 +368,7 @@ export function Accounts() {
       <div>
         <h1 className="text-lg font-bold text-gray-900">계정 관리</h1>
         <p className="mt-0.5 text-sm text-gray-500">
-          직원 계정의 역할·부서·소속기관을 관리합니다. system 전용.
+          직원 계정의 역할·부서·소속기관을 관리합니다. 시스템팀 관리자 전용.
         </p>
       </div>
 

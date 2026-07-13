@@ -2,31 +2,30 @@ import { NavLink } from 'react-router-dom'
 import { useAuth } from '../auth/useAuth'
 import type { UserRole } from '../types/database'
 import { NotificationBell } from './NotificationBell'
+import { ROLE_LABEL } from '../lib/constants'
+import { canAccessApp, canProcess, canSeeDashboard, canManageAccounts } from '../lib/permissions'
+
+type Role = UserRole | null | undefined
 
 interface NavItem {
   to: string
   label: string
-  roles: UserRole[] // 이 메뉴를 볼 수 있는 역할
+  can: (role: Role) => boolean // 이 메뉴를 볼 수 있는 능력 술어 (src/lib/permissions.ts)
 }
 
+// 능력→역할 매핑의 단일 소스는 src/lib/permissions.ts. 여기서는 역할 배열을 복제하지 않는다.
 const NAV_ITEMS: NavItem[] = [
-  { to: '/requests/new', label: '요청 접수', roles: ['staff', 'system'] },
-  { to: '/requests/mine', label: '내 요청', roles: ['staff', 'system'] },
-  { to: '/board', label: '관리 보드', roles: ['system'] },
-  { to: '/dashboard', label: '통계', roles: ['system', 'viewer'] },
-  { to: '/accounts', label: '계정 관리', roles: ['system'] },
+  { to: '/requests/new', label: '요청 접수', can: canAccessApp },
+  { to: '/requests/mine', label: '내 요청', can: canAccessApp },
+  { to: '/board', label: '관리 보드', can: canProcess },
+  { to: '/dashboard', label: '통계', can: canSeeDashboard },
+  { to: '/accounts', label: '계정 관리', can: canManageAccounts },
 ]
-
-const ROLE_LABEL: Record<UserRole, string> = {
-  staff: '일반직원',
-  system: '시스템팀',
-  viewer: '열람',
-}
 
 export function TopNav() {
   const { profile, role, signOut } = useAuth()
 
-  const visibleItems = NAV_ITEMS.filter((item) => role && item.roles.includes(role))
+  const visibleItems = NAV_ITEMS.filter((item) => item.can(role))
 
   return (
     <header className="flex-none border-b border-gray-200 bg-white">

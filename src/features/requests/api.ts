@@ -16,6 +16,7 @@ import type {
   DeptOption,
   SharedTargetType,
   PriorityLevel,
+  UserRole,
 } from '../../types/database'
 import type { Urgency } from '../../lib/constants'
 
@@ -223,7 +224,7 @@ export interface BoardProfile {
   id: string
   name: string | null
   email: string
-  role: 'staff' | 'system' | 'viewer'
+  role: UserRole
   org_affil: RequestOrg | null
   dept_function: string | null
 }

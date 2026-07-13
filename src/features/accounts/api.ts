@@ -34,11 +34,12 @@ export interface ImportResult {
   errors: { email: string; reason: string }[]
 }
 
-export function useUsers() {
+export function useUsers(enabled = true) {
   return useQuery({
     queryKey: ['users', 'list'],
     queryFn: () => apiGet<UserRow[]>('/api/users'),
     staleTime: 30_000,
+    enabled,
   })
 }
 
