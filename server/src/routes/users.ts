@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { sql } from 'drizzle-orm'
 import { db, withUser } from '../db/client.js'
 import { authenticate } from '../auth/session.js'
-import { isSystem } from '../authz.js'
+import { canProcess, canManageAccounts } from '../authz.js'
 import { isOneOf, ORGS } from '../http.js'
 
 const ROLES = ['staff', 'system', 'viewer'] as const
@@ -10,10 +10,13 @@ const ROLES = ['staff', 'system', 'viewer'] as const
 export async function userRoutes(app: FastifyInstance) {
   app.addHook('preHandler', authenticate)
 
-  // GET /api/users — system 전용. users 전체 목록
+  // GET /api/users — 처리 능력자(canProcess)에게 연다. 관리자 전용(canManageAccounts)으로
+  // 막지 않는 이유: src/features/requests/AdminPanel.tsx의 담당자 select가 이 API로 담당자
+  // 후보 목록을 가져온다 — 목록 조회는 배정을 위해 처리자에게 필요하고, 역할·소속 "변경"만
+  // 아래 PATCH/조직도 import에서 관리자로 제한한다.
   app.get('/api/users', async (request, reply) => {
     const u = request.currentUser!
-    if (!isSystem(u)) {
+    if (!canProcess(u)) {
       reply.code(403)
       return { error: 'forbidden' }
     }
@@ -35,12 +38,12 @@ export async function userRoutes(app: FastifyInstance) {
     return result.rows
   })
 
-  // PATCH /api/users/:id — system 전용. role/dept/org_affil/dept_function 부분 수정
+  // PATCH /api/users/:id — 관리자(canManageAccounts) 전용. role/dept/org_affil/dept_function 부분 수정
   app.patch<{ Params: { id: string }; Body: any }>(
     '/api/users/:id',
     async (request, reply) => {
       const u = request.currentUser!
-      if (!isSystem(u)) {
+      if (!canManageAccounts(u)) {
         reply.code(403)
         return { error: 'forbidden' }
       }
@@ -119,12 +122,12 @@ export async function userRoutes(app: FastifyInstance) {
     },
   )
 
-  // POST /api/org-directory/import — system 전용. org_directory 대량 upsert
+  // POST /api/org-directory/import — 관리자(canManageAccounts) 전용. org_directory 대량 upsert
   app.post<{ Body: any }>(
     '/api/org-directory/import',
     async (request, reply) => {
       const u = request.currentUser!
-      if (!isSystem(u)) {
+      if (!canManageAccounts(u)) {
         reply.code(403)
         return { error: 'forbidden' }
       }

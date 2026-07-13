@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { sql } from 'drizzle-orm'
 import { db, withUser } from '../db/client.js'
 import { authenticate } from '../auth/session.js'
-import { canSeeRequest, isSystem, canSeeComment } from '../authz.js'
+import { canSeeRequest, canProcess, canSeeComment } from '../authz.js'
 import { parseId } from '../http.js'
 import type { CurrentUser } from '../types.js'
 import { notify } from '../services/notify.js'
@@ -89,7 +89,7 @@ export async function requestDetailRoutes(app: FastifyInstance) {
 
       // is_internal: 시스템팀만 true 가능. staff가 true 요청하면 false로 강제
       const wantsInternal = request.body?.is_internal === true
-      const isInternal = wantsInternal && isSystem(u)
+      const isInternal = wantsInternal && canProcess(u)
 
       // reqMeta 조회를 withUser 트랜잭션 안에서 수행해 TOCTOU 방지
       // (INSERT 시점의 최신 assignee를 읽음)
@@ -109,7 +109,7 @@ export async function requestDetailRoutes(app: FastifyInstance) {
       // 공개 댓글인 경우에만 알림 발송
       if (!isInternal && reqRow) {
         const seq = reqRow.seq ?? String(id)
-        const actorIsSystem = isSystem(u)
+        const actorIsSystem = canProcess(u)
         // 행위자가 시스템/담당이면 requester에게, 행위자가 requester이면 assignee에게
         if (actorIsSystem || reqRow.assignee_id === u.id) {
           // 시스템팀 또는 담당자가 댓글 → requester에게 알림

@@ -3,7 +3,7 @@ import { createReadStream } from 'node:fs'
 import { sql } from 'drizzle-orm'
 import { db } from '../db/client.js'
 import { authenticate } from '../auth/session.js'
-import { canSeeRequest, isViewerUp } from '../authz.js'
+import { canSeeRequest, canSeeAllRequests } from '../authz.js'
 import { saveUpload, resolveUpload } from '../storage.js'
 import { parseId } from '../http.js'
 import type { CurrentUser } from '../types.js'
@@ -60,7 +60,7 @@ export async function attachmentRoutes(app: FastifyInstance) {
     const att = a.rows[0]; if (!att) { reply.code(404).send({ error: 'not found' }); return }
     // 다운로드 권한: 시스템팀·열람자, 업로더 본인, 또는 해당 요청을 열람할 수 있는 사용자
     // (시스템팀이 요청자에게 전달하는 산출물 파일 다운로드 지원)
-    const canDownload = isViewerUp(u) || att.uploaded_by === u.id || (await canSee(u, att.request_id))
+    const canDownload = canSeeAllRequests(u) || att.uploaded_by === u.id || (await canSee(u, att.request_id))
     if (!canDownload) { reply.code(404).send({ error: 'not found' }); return }
     reply.header('Content-Type', att.mime_type ?? 'application/octet-stream')
     reply.header('X-Content-Type-Options', 'nosniff') // 클라이언트 지정 MIME 스니핑 방지
