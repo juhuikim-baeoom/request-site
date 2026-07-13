@@ -1,0 +1,173 @@
+/**
+ * 공유 설정 사후 수정 테스트
+ * - 권한: 요청자 본인(종결 건 포함) / 시스템팀 200, 무관한 staff 403
+ * - 전체 교체: 한 번의 PUT으로 추가·제거가 반영된다
+ * - 이력: added/removed가 정확히 기록되고, 변경이 없으면 행이 남지 않는다
+ * - 열람 반영: 공유 대상을 추가하면 그 부서 사용자의 목록에 실제로 나타난다 (이 기능의 존재 이유)
+ * - 회귀: visibility를 기존 PATCH로 바꾸려 하면 거부된다 (우회로 차단)
+ */
+import assert from 'node:assert/strict'
+import { randomBytes } from 'node:crypto'
+import { buildApp } from '../src/app.js'
+import { db, pool } from '../src/db/client.js'
+import { users, requests, sessions } from '../src/db/schema.js'
+import { eq, inArray, sql } from 'drizzle-orm'
+
+const app = await buildApp()
+const suffix = randomBytes(4).toString('hex')
+const created: { userIds: string[]; reqIds: number[] } = { userIds: [], reqIds: [] }
+
+/** 사용자 생성 + 세션 쿠키 획득. test-role-boundaries.ts의 헬퍼와 같은 방식 */
+let mkUserSeq = 0
+async function mkUser(role: string, orgAffil: string, deptFunction: string | null) {
+  // role만으로는 owner/outsider가 둘 다 'staff'라 이메일이 충돌한다 — 호출 순번을 섞어 유일성 보장.
+  const email = `sharing-${role}-${suffix}-${mkUserSeq++}@baeoom.com`
+  const [u] = await db.insert(users).values({
+    email, name: `${role} 테스트`, role: role as any,
+    orgAffil: orgAffil as any, deptFunction,
+  }).returning()
+  created.userIds.push(u.id)
+  return u
+}
+
+/**
+ * 주어진 사용자 id로 세션을 직접 만들고 서명 쿠키 문자열("sid=...")을 발급한다.
+ * test-role-boundaries.ts의 makeUser 헬퍼와 동일한 방식(randomBytes 토큰 → sessions insert →
+ * app.signCookie)이다. dev-login은 고정 계정만 로그인시키므로 임의 역할 테스트에는 쓸 수 없다.
+ * 세션 행은 users FK의 onDelete: cascade로 사용자 삭제 시 함께 정리된다.
+ */
+async function sessionCookieFor(userId: string): Promise<string> {
+  const token = randomBytes(32).toString('hex')
+  await db.insert(sessions).values({ id: token, userId, expiresAt: new Date(Date.now() + 60_000) })
+  return `sid=${app.signCookie(token)}`
+}
+
+try {
+  const owner = await mkUser('staff', '배움', '교학팀')          // 요청자
+  const outsider = await mkUser('staff', '배론', '상담영업팀')   // 무관한 직원
+  const sysUser = await mkUser('system', '공통', '시스템팀')     // 시스템팀 담당자
+
+  const cookie = (u: { id: string }) => sessionCookieFor(u.id)
+
+  // 요청 생성: private (본인만 열람)
+  const [req] = await db.insert(requests).values({
+    org: '배움', typeCode: 'error', title: '공유테스트',
+    requesterId: owner.id, visibility: 'private',
+  }).returning()
+  created.reqIds.push(req.id)
+
+  // ── (1) 무관한 staff는 공유를 바꿀 수 없다
+  {
+    const res = await app.inject({
+      method: 'PUT', url: `/api/requests/${req.id}/sharing`,
+      headers: { cookie: await cookie(outsider) },
+      payload: { visibility: 'private', shared_targets: [{ target_type: 'dept', target_value: '배론|상담영업팀' }] },
+    })
+    assert.equal(res.statusCode, 403, '무관한 staff는 403')
+    console.log('(1) 무관한 staff 403 OK')
+  }
+
+  // ── (2) 요청자 본인이 공유 대상을 추가한다 → 그 부서 사용자에게 실제로 보인다
+  {
+    const before = await app.inject({
+      method: 'GET', url: '/api/requests', headers: { cookie: await cookie(outsider) },
+    })
+    const beforeIds = (before.json() as any[]).map((r) => Number(r.id))
+    assert.ok(!beforeIds.includes(req.id), '공유 전에는 outsider에게 안 보인다')
+
+    const res = await app.inject({
+      method: 'PUT', url: `/api/requests/${req.id}/sharing`,
+      headers: { cookie: await cookie(owner) },
+      payload: { visibility: 'private', shared_targets: [{ target_type: 'dept', target_value: '배론|상담영업팀' }] },
+    })
+    assert.equal(res.statusCode, 200, '요청자 본인은 200')
+
+    const after = await app.inject({
+      method: 'GET', url: '/api/requests', headers: { cookie: await cookie(outsider) },
+    })
+    const afterIds = (after.json() as any[]).map((r) => Number(r.id))
+    assert.ok(afterIds.includes(req.id), '공유 후에는 outsider에게 보인다')
+    console.log('(2) 공유 추가 → 열람 반영 OK')
+  }
+
+  // ── (3) 이력: added가 기록된다
+  {
+    const h = await db.execute<any>(sql`
+      select from_visibility, to_visibility, added, removed
+      from request_sharing_history where request_id = ${req.id} order by id`)
+    assert.equal(h.rows.length, 1, '이력 1건')
+    assert.deepEqual(h.rows[0].added, [{ target_type: 'dept', target_value: '배론|상담영업팀' }], 'added 기록')
+    assert.deepEqual(h.rows[0].removed, [], 'removed 없음')
+    console.log('(3) 이력 added 기록 OK')
+  }
+
+  // ── (4) 전체 교체: 기존 대상이 빠지고 새 대상이 들어간다
+  {
+    const res = await app.inject({
+      method: 'PUT', url: `/api/requests/${req.id}/sharing`,
+      headers: { cookie: await cookie(sysUser) },
+      payload: { visibility: 'org', shared_targets: [{ target_type: 'function', target_value: '교학팀' }] },
+    })
+    assert.equal(res.statusCode, 200, '시스템팀은 200')
+
+    const t = await db.execute<any>(sql`
+      select target_type, target_value from request_shared_targets where request_id = ${req.id}`)
+    assert.equal(t.rows.length, 1, '대상 1건으로 교체')
+    assert.equal(t.rows[0].target_value, '교학팀', '새 대상')
+
+    const h = await db.execute<any>(sql`
+      select from_visibility, to_visibility, added, removed
+      from request_sharing_history where request_id = ${req.id} order by id desc limit 1`)
+    assert.equal(h.rows[0].from_visibility, 'private')
+    assert.equal(h.rows[0].to_visibility, 'org')
+    assert.deepEqual(h.rows[0].added, [{ target_type: 'function', target_value: '교학팀' }])
+    assert.deepEqual(h.rows[0].removed, [{ target_type: 'dept', target_value: '배론|상담영업팀' }])
+    console.log('(4) 전체 교체 + added/removed 기록 OK')
+  }
+
+  // ── (5) 변경이 없으면 이력을 남기지 않는다
+  {
+    const cntBefore = await db.execute<any>(sql`
+      select count(*)::int n from request_sharing_history where request_id = ${req.id}`)
+    const res = await app.inject({
+      method: 'PUT', url: `/api/requests/${req.id}/sharing`,
+      headers: { cookie: await cookie(owner) },
+      payload: { visibility: 'org', shared_targets: [{ target_type: 'function', target_value: '교학팀' }] },
+    })
+    assert.equal(res.statusCode, 200)
+    const cntAfter = await db.execute<any>(sql`
+      select count(*)::int n from request_sharing_history where request_id = ${req.id}`)
+    assert.equal(cntAfter.rows[0].n, cntBefore.rows[0].n, '변경 없으면 이력 없음')
+    console.log('(5) 무변경 시 이력 없음 OK')
+  }
+
+  // ── (6) 종결 건도 요청자가 공유를 바꿀 수 있다
+  {
+    await db.update(requests).set({ status: '완료' }).where(eq(requests.id, req.id))
+    const res = await app.inject({
+      method: 'PUT', url: `/api/requests/${req.id}/sharing`,
+      headers: { cookie: await cookie(owner) },
+      payload: { visibility: 'shared', shared_targets: [] },
+    })
+    assert.equal(res.statusCode, 200, '종결 건도 200')
+    console.log('(6) 종결 건 공유 변경 OK')
+  }
+
+  // ── (7) 회귀: visibility를 기존 PATCH로 바꾸려 하면 거부된다 (우회로 차단)
+  {
+    const res = await app.inject({
+      method: 'PATCH', url: `/api/requests/${req.id}`,
+      headers: { cookie: await cookie(sysUser) },
+      payload: { visibility: 'private' },
+    })
+    assert.equal(res.statusCode, 400, 'PATCH로는 visibility를 못 바꾼다')
+    console.log('(7) PATCH 우회로 차단 OK')
+  }
+
+  console.log('\ntest:sharing ALL PASSED')
+} finally {
+  if (created.reqIds.length) await db.delete(requests).where(inArray(requests.id, created.reqIds))
+  if (created.userIds.length) await db.delete(users).where(inArray(users.id, created.userIds))
+  await app.close()
+  await pool.end()
+}

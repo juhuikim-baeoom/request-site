@@ -2,11 +2,12 @@ import type { FastifyInstance } from 'fastify'
 import { sql } from 'drizzle-orm'
 import { db, withUser } from '../db/client.js'
 import { authenticate } from '../auth/session.js'
-import { visibilityFilter, canProcess } from '../authz.js'
+import { visibilityFilter, canProcess, canChangeSharing } from '../authz.js'
 import { parseId, isOneOf, ORGS, TYPE_CODES, PRIORITIES, VISIBILITIES } from '../http.js'
 import { changeStatus, TransitionError } from '../services/transition.js'
 import { assignRequest, AssignError } from '../services/assign.js'
 import { changeImpact, ImpactError, CLOSED } from '../services/impact.js'
+import { changeSharing, SharingError, type Visibility, type SharedTarget } from '../services/sharing.js'
 import { computeSlaFields, computeResponseDueAtForUrgency, loadHolidaySet } from '../services/sla-fields.js'
 import { type Urgency, type Impact } from '../sla.js'
 
@@ -122,9 +123,14 @@ export async function requestRoutes(app: FastifyInstance) {
 
     // 수정 대상 enum 값 검증 (status가 있으면 changeStatus에서 검증하므로 여기서는 기본 형식만)
     if (
-      (b.urgency !== undefined && !isOneOf(PRIORITIES, b.urgency)) ||
-      (b.visibility !== undefined && !isOneOf(VISIBILITIES, b.visibility))
+      (b.urgency !== undefined && !isOneOf(PRIORITIES, b.urgency))
     ) { reply.code(400); return { error: 'invalid enum' } }
+
+    // visibility는 PUT /api/requests/:id/sharing 에서만 바꾼다 (권한 규칙이 다르다)
+    if (b.visibility !== undefined) {
+      reply.code(400)
+      return { error: 'visibility는 PUT /api/requests/:id/sharing 으로 변경하세요', code: 'USE_SHARING_ENDPOINT' }
+    }
 
     const cur = await db.execute<any>(sql`select requester_id, status from requests where id = ${id}`)
     const row = cur.rows[0]
@@ -136,7 +142,7 @@ export async function requestRoutes(app: FastifyInstance) {
     // 상태 변경은 changeStatus()를 통해서만
     if (b.status !== undefined) {
       // status 변경과 내용 편집을 한 번에 허용하지 않아 stale-status 우회 방지 (issues 2, 4, 5, 6)
-      const otherFields = ['title', 'body', 'urgency', 'visibility', 'desired_due', 'assignee_id']
+      const otherFields = ['title', 'body', 'urgency', 'desired_due', 'assignee_id']
       if (otherFields.some((k) => b[k] !== undefined)) {
         reply.code(400); return { error: 'status change and field edit must not be combined in one request' }
       }
@@ -163,11 +169,11 @@ export async function requestRoutes(app: FastifyInstance) {
 
     // 내용 수정 — 시스템팀 또는 (본인 且 접수)
     // row.status는 status 변경이 없는 경우에만 이 분기에 도달하므로 stale 문제 없음
-    const wantsEdit = ['title', 'body', 'urgency', 'visibility', 'desired_due'].some((k) => b[k] !== undefined)
+    const wantsEdit = ['title', 'body', 'urgency', 'desired_due'].some((k) => b[k] !== undefined)
     if (wantsEdit && !sys && !(isOwner && row.status === '접수')) { reply.code(403); return { error: 'forbidden' } }
 
     const sets: any[] = []
-    for (const k of ['title', 'body', 'urgency', 'visibility', 'desired_due', 'assignee_id']) {
+    for (const k of ['title', 'body', 'urgency', 'desired_due', 'assignee_id']) {
       if (b[k] !== undefined) sets.push(sql`${sql.raw(k)} = ${b[k]}`)
     }
     if (!sets.length) { reply.code(400); return { error: 'no fields' } }
@@ -289,6 +295,61 @@ export async function requestRoutes(app: FastifyInstance) {
         }
         throw e
       }
+    },
+  )
+
+  // 공유 설정 변경 — 시스템팀 또는 요청자 본인(상태 무관, 종결 후에도).
+  // 공개범위와 공유 대상을 한 번에 전체 교체한다.
+  app.put<{ Params: { id: string }; Body: { visibility?: string; shared_targets?: unknown } }>(
+    '/api/requests/:id/sharing',
+    async (request, reply) => {
+      const u = request.currentUser!
+      const id = parseId(request.params.id)
+      if (id == null) { reply.code(404); return { error: 'not found' } }
+
+      const b = request.body ?? {}
+      if (!isOneOf(VISIBILITIES, b.visibility as string)) {
+        reply.code(400); return { error: 'invalid visibility' }
+      }
+      const rawTargets = Array.isArray(b.shared_targets) ? b.shared_targets : null
+      if (rawTargets == null) {
+        reply.code(400); return { error: 'shared_targets required' }
+      }
+      const targets: SharedTarget[] = []
+      for (const t of rawTargets as any[]) {
+        if (t?.target_type !== 'function' && t?.target_type !== 'dept') {
+          reply.code(400); return { error: 'invalid target_type' }
+        }
+        if (typeof t.target_value !== 'string' || t.target_value.length === 0) {
+          reply.code(400); return { error: 'invalid target_value' }
+        }
+        targets.push({ target_type: t.target_type, target_value: t.target_value })
+      }
+
+      // 권한 판정에 요청자 id가 필요하다
+      const cur = await db.execute<{ requester_id: string | null }>(
+        sql`select requester_id from requests where id = ${id}`,
+      )
+      const row = cur.rows[0]
+      if (!row) { reply.code(404); return { error: 'not found' } }
+      if (!canChangeSharing(u, row.requester_id)) { reply.code(403); return { error: 'forbidden' } }
+
+      try {
+        await changeSharing({
+          reqId: id,
+          visibility: b.visibility as Visibility,
+          targets,
+          actorId: u.id,
+        })
+      } catch (e: any) {
+        if (e instanceof SharingError) {
+          if (e.code === 'NOT_FOUND') { reply.code(404); return { error: 'not found' } }
+          reply.code(400); return { error: e.message, code: e.code }
+        }
+        throw e
+      }
+
+      reply.code(200); return { ok: true }
     },
   )
 }
