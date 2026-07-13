@@ -15,6 +15,10 @@
   - 되돌릴 때 서버가 배정 정보를 초기화한다: `assignee_id`·`impact`·`priority_level`·`assigned_at`·`first_response_at`·`response_due_at`·`resolution_due_at`·`sla_policy_id` → null, `sla_response_breached` → false. 미배정 큐로 복귀하며 재배정이 가능하다(`assignRequest`는 `status='접수'`만 대상으로 삼음).
   - 회귀 테스트 추가: `server/scripts/test-transition.ts` (6) 진행중 → 접수 되돌리기 + 배정 초기화.
 
+### Fixed
+- **`sla_response_breached` 재계산이 `first_response_at`을 무시하던 문제** (`server/src/services/sla-fields.ts`): `computeSlaFields`가 항상 `new Date() > responseDueAt`(현재 시각 기준)으로 판정해, 오래전 생성되어 기한 내 정상 응답을 마친 건도 나중에 긴급도·영향도만 바꾸면 `response_due_at`(생성 시각 기준 과거 시점)이 이미 지난 것으로 잡혀 `sla_response_breached`가 true로 뒤집히는 데이터 오염이 있었다. `firstResponseAt` 인자를 추가해, 응답이 이미 이뤄진 건은 "응답 시각이 기한을 넘겼는가", 아직 응답 전인 건만 "현재 시각이 기한을 넘겼는가"로 판정하도록 수정. 호출자 3곳(`assign.ts`·`impact.ts`·`routes/requests.ts` 긴급도 재산정 분기)이 각자 맥락의 `firstResponseAt`을 전달한다 — 배정(`assignRequest`)은 배정 시점에 `first_response_at`을 세팅하는 경로이므로 그 시각을 그대로 넘겨 "응답 기한을 이미 넘긴 채 배정되면 breach=true" 기존 동작을 보존. 회귀 테스트: `server/scripts/test-impact.ts` (5) 2주 전 생성·기한 내 응답 완료 건에서 영향도만 바꿔도 `sla_response_breached=false` 유지.
+- **미배정 건의 긴급도 편집이 `response_due_at`을 갱신하지 않던 문제** (`server/src/routes/requests.ts`): 긴급도 재산정 분기가 `impact != null`(=배정된 건)일 때만 동작해, 요청자가 유일하게 편집 가능한 창(`status='접수'`, 대개 미배정)에서 긴급도를 바꿔도 `response_due_at`이 이전 긴급도 기준으로 남아 응답 SLA가 과소평가되는 문제가 있었다. `impact == null`이고 종결 상태가 아닌 경우, 요청 생성부의 계산을 추출한 공용 함수 `computeResponseDueAtForUrgency`(`server/src/services/sla-fields.ts`)로 `response_due_at`만 재산정하도록 수정(계산식 중복 정의 없음). 회귀 테스트: `server/scripts/test-api-write.ts` 미배정 건 긴급도 편집 시 `response_due_at` 재산정.
+
 ### Added
 - **접수폼 2-페인 레이아웃 재설계** (`src/features/requests/RequestForm.tsx`, `src/features/requests/BodyEditorSlot.tsx`, `src/lib/constants.ts`)
   - 레이아웃: `grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_340px]` 셸 + `max-w-[1600px]` 상한. ≥lg 2-페인, <lg 단일 컬럼 + 모바일 하단 고정 제출바(`env(safe-area-inset-bottom)`).

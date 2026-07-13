@@ -163,6 +163,59 @@ async function makeRequest() {
   await db.delete(users).where(eq(users.id, otherUser.id))
 }
 
+// ──────────────────────────────────────────
+// (5) I-2 회귀: 기한 내 응답 완료된 오래된 건 — 영향도 변경 시 sla_response_breached는
+// false로 유지되어야 한다 (firstResponseAt 기준 판정, new Date() 기준 판정 금지).
+// assignRequest는 first_response_at=now()로만 세팅하므로 "2주 전에 이미 기한 내 응답을
+// 마친" 상태는 재현할 수 없다 — raw UPDATE로 그 상태를 직접 시뮬레이션한다.
+// ──────────────────────────────────────────
+{
+  const twoWeeksAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000)
+  const onTimeResponse = new Date(twoWeeksAgo.getTime() + 30 * 60 * 1000) // 생성 30분 후 응답(기한 내)
+
+  const [req] = await db.insert(requests).values({
+    org: '공통', typeCode: 'error', title: '오래된건SLA회귀테스트',
+    requesterId: actorId, visibility: 'dept', urgency: '보통',
+    createdAt: twoWeeksAgo,
+  }).returning()
+
+  const p3 = await db.execute<{ id: number }>(sql`select id from sla_policy where priority_level = 'P3'`)
+
+  // 2주 전 배정되어 기한 내(생성 30분 후) 정상 응답 완료된 상태를 직접 세팅
+  await db.execute(sql`
+    update requests
+    set assignee_id = ${actorId}, impact = '보통', priority_level = 'P3',
+        status = '진행중', assigned_at = ${onTimeResponse}, first_response_at = ${onTimeResponse},
+        response_due_at = ${new Date(twoWeeksAgo.getTime() + 8 * 60 * 60 * 1000)},
+        resolution_due_at = ${new Date(twoWeeksAgo.getTime() + 32 * 60 * 60 * 1000)},
+        sla_policy_id = ${p3.rows[0].id},
+        sla_response_breached = false
+    where id = ${req.id}
+  `)
+
+  const before = await db.execute<any>(sql`
+    select sla_response_breached, first_response_at from requests where id = ${req.id}`)
+  assert.equal(before.rows[0].sla_response_breached, false, '사전조건: 기한 내 응답 breached=false')
+
+  // 시스템팀이 영향도만 변경 (보통 → 높음) — priority_level·SLA 기한 재산정 트리거
+  const res = await changeImpact({ reqId: req.id, impact: '높음', actorId })
+  assert.equal(res.priorityLevel, 'P2', '보통×높음 = P2')
+
+  const after = await db.execute<any>(sql`
+    select priority_level, sla_response_breached, first_response_at
+    from requests where id = ${req.id}`)
+  const a = after.rows[0]
+  assert.equal(a.priority_level, 'P2', 'priority_level 재산정')
+  assert.equal(
+    a.sla_response_breached, false,
+    'I-2 회귀: 2주 전 생성·기한 내 응답 완료 건에서 영향도만 바꿔도 sla_response_breached는 false로 유지되어야 함',
+  )
+  assert.equal(String(a.first_response_at), String(before.rows[0].first_response_at), 'first_response_at 보존')
+  console.log('(5) I-2 회귀: 오래된 기한내응답 건 영향도 변경 시 sla_response_breached=false 유지 OK')
+
+  await db.delete(requests).where(eq(requests.id, req.id))
+}
+
 await app.close()
 await pool.end()
 console.log('\ntest:impact ALL PASSED')

@@ -115,5 +115,51 @@ await db.delete(requests).where(eq(requests.id, reqId))
   await db.delete(requests).where(eq(requests.id, urgId))
 }
 
+// ──────────────────────────────────────────
+// 미배정 건 긴급도 편집 → response_due_at만 재산정 (최종 리뷰 I-1)
+// 요청자가 편집할 수 있는 유일한 창(status='접수', 대개 미배정)에서 긴급도를 바꾸면
+// impact가 없어 priority_level·resolution_due_at은 정할 수 없지만, response_due_at은
+// 생성부와 동일한 함수(computeResponseDueAtForUrgency)로 새 긴급도 기준으로 갱신되어야 한다.
+// ──────────────────────────────────────────
+{
+  const create3 = await app.inject({
+    method: 'POST', url: '/api/requests', cookies,
+    payload: {
+      org: '공통', type_code: 'error', urgency: '낮음', visibility: 'dept',
+      title: '미배정긴급도재산정테스트',
+      intake_detail: { screen_url: 'https://x', reproduce: '재현', occurred_at: '2026-01-01' },
+    },
+  })
+  assert.equal(create3.statusCode, 201)
+  const unassignedId = create3.json().id
+
+  const before3 = await db.execute<any>(sql`
+    select impact, priority_level, response_due_at, status from requests where id = ${unassignedId}`)
+  const b3 = before3.rows[0]
+  assert.equal(b3.impact, null, '미배정: impact null')
+  assert.equal(b3.status, '접수', '미배정: status 접수')
+  assert.ok(b3.response_due_at !== null, '생성 시 urgency=낮음 기준 response_due_at 세팅됨')
+
+  const urgEdit3 = await app.inject({
+    method: 'PATCH', url: `/api/requests/${unassignedId}`, cookies, payload: { urgency: '높음' },
+  })
+  assert.equal(urgEdit3.statusCode, 200, 'unassigned urgency edit ok')
+
+  const after3 = await db.execute<any>(sql`
+    select urgency, impact, priority_level, response_due_at, status from requests where id = ${unassignedId}`)
+  const a3 = after3.rows[0]
+  assert.equal(a3.urgency, '높음', 'urgency 갱신')
+  assert.equal(a3.impact, null, 'impact는 여전히 null (미배정 유지)')
+  assert.equal(a3.priority_level, null, 'priority_level은 미배정 상태이므로 여전히 미정')
+  assert.equal(a3.status, '접수', 'status 보존')
+  assert.notEqual(
+    String(a3.response_due_at), String(b3.response_due_at),
+    'I-1 회귀: 미배정 건도 긴급도 편집 시 response_due_at이 새 긴급도 기준으로 재산정되어야 함',
+  )
+  console.log('unassigned urgency edit ok: response_due_at만 재산정, impact/priority_level 미배정 유지')
+
+  await db.delete(requests).where(eq(requests.id, unassignedId))
+}
+
 await app.close(); await pool.end()
 console.log('API WRITE TEST OK')

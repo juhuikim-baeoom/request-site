@@ -48,12 +48,18 @@ export async function assignRequest({
       throw new AssignError('접수 상태인 요청만 배정할 수 있습니다', 'ONLY_FROM_RECEIVED')
     }
 
+    // 배정은 이 시점에 first_response_at을 세팅하는 경로다 — 같은 시각을
+    // computeSlaFields의 firstResponseAt과 UPDATE의 assigned_at/first_response_at에
+    // 동일하게 사용해, "응답 기한을 이미 넘긴 채 배정되면 breach=true" 기존 동작을 보존한다.
+    const now = new Date()
+
     const sla = await computeSlaFields({
       tx,
       urgency: row.urgency,
       impact,
       createdAt: row.created_at,
       holidaySet,
+      firstResponseAt: now,
     })
 
     // AND status = '접수' 로 낙관적 잠금: 동시 업데이트가 이미 상태를 바꿨다면 0행 리턴
@@ -64,8 +70,8 @@ export async function assignRequest({
         impact                = ${impact},
         priority_level        = ${sla.priorityLevel},
         status                = '진행중',
-        assigned_at           = now(),
-        first_response_at     = now(),
+        assigned_at           = ${now},
+        first_response_at     = ${now},
         response_due_at       = ${sla.responseDueAt},
         resolution_due_at     = ${sla.resolutionDueAt},
         sla_policy_id         = ${sla.slaPolicyId},
