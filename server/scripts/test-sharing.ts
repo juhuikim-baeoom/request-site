@@ -67,6 +67,17 @@ try {
     console.log('(1) 무관한 staff 403 OK')
   }
 
+  // ── (1b) canSeeRequest를 통과 못 하면(=private, 아직 공유 안 됨) 공유 이력도 404 —
+  //     별도 게이트가 아니라 상세 열람 권한을 그대로 따른다는 것을 확인한다
+  {
+    const res = await app.inject({
+      method: 'GET', url: `/api/requests/${req.id}/sharing-history`,
+      headers: { cookie: await cookie(outsider) },
+    })
+    assert.equal(res.statusCode, 404, '요청을 볼 수 없으면 공유 이력도 404')
+    console.log('(1b) 열람 불가 시 공유 이력도 404 OK')
+  }
+
   // ── (2) 요청자 본인이 공유 대상을 추가한다 → 그 부서 사용자에게 실제로 보인다
   {
     const before = await app.inject({
@@ -99,6 +110,27 @@ try {
     assert.deepEqual(h.rows[0].added, [{ target_type: 'dept', target_value: '배론|상담영업팀' }], 'added 기록')
     assert.deepEqual(h.rows[0].removed, [], 'removed 없음')
     console.log('(3) 이력 added 기록 OK')
+  }
+
+  // ── (3b) 공유 이력이 상세 응답(타임라인용 엔드포인트)에 실제로 실린다 —
+  //     타임라인에 표시되려면 응답에 담겨야 한다. 요청을 볼 수 있는 outsider(공유 대상으로
+  //     막 추가됨)도 열람 가능해야 한다(내부메모와 달리 별도 게이트가 없어야 함).
+  {
+    const res = await app.inject({
+      method: 'GET', url: `/api/requests/${req.id}/sharing-history`,
+      headers: { cookie: await cookie(outsider) },
+    })
+    assert.equal(res.statusCode, 200, '공유 대상으로 추가된 outsider도 이력을 볼 수 있다')
+    const rows = res.json() as any[]
+    assert.equal(rows.length, 1, '이력 1건이 응답에 실린다')
+    assert.equal(rows[0].actor.name, `${owner.name}`, '변경자 이름이 actor.name으로 붙는다')
+    // visibility는 그대로(private→private)라 변경 없음으로 간주되어 null로 기록된다
+    // (services/sharing.ts changeSharing: visibilityChanged일 때만 from/to를 채운다)
+    assert.equal(rows[0].from_visibility, null)
+    assert.equal(rows[0].to_visibility, null)
+    assert.deepEqual(rows[0].added, [{ target_type: 'dept', target_value: '배론|상담영업팀' }])
+    assert.deepEqual(rows[0].removed, [])
+    console.log('(3b) GET .../sharing-history 응답에 이력 반영 OK')
   }
 
   // ── (4) 전체 교체: 기존 대상이 빠지고 새 대상이 들어간다

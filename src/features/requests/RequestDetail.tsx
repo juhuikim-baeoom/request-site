@@ -9,6 +9,8 @@ import {
   STATUS_BADGE,
   PRIORITY_LEVEL_BADGE,
   URGENCY_OPTIONS,
+  VISIBILITY_OPTIONS,
+  deptTargetLabel,
   dueBadgeClass,
 } from '../../lib/constants'
 import { fmtDateTime } from '../../lib/format'
@@ -27,6 +29,7 @@ import {
   useRequestComments,
   useRequestDetail,
   useRequestHistory,
+  useRequestSharingHistory,
   useRework,
   useUpdateRequest,
   useUploadCommentAttachment,
@@ -56,7 +59,7 @@ function relDue(isoOrNull: string | null | undefined): string {
 
 // ---------- 타임라인 병합 ----------
 
-type TimelineKind = 'history' | 'comment' | 'attachment'
+type TimelineKind = 'history' | 'comment' | 'attachment' | 'sharing'
 
 interface TimelineItem {
   kind: TimelineKind
@@ -74,6 +77,24 @@ interface TimelineItem {
   fileName?: string | null
   fileSize?: number | null
   attachmentId?: number
+  // sharing
+  fromVisibility?: string | null
+  toVisibility?: string | null
+  added?: Array<{ target_type: string; target_value: string }>
+  removed?: Array<{ target_type: string; target_value: string }>
+}
+
+function visibilityLabel(v: string): string {
+  return VISIBILITY_OPTIONS.find((o) => o.value === v)?.label ?? v
+}
+
+function targetLabel(t: { target_type: string; target_value: string }): string {
+  // dept 값은 '배움|교학팀' 형식 — deptTargetLabel이 '배움_교학팀'으로 표시한다
+  if (t.target_type === 'dept') {
+    const [org, fn] = t.target_value.split('|')
+    return deptTargetLabel(org, fn)
+  }
+  return t.target_value
 }
 
 export function RequestDetail() {
@@ -95,6 +116,7 @@ export function RequestDetail() {
   const { data: attachments } = useRequestAttachments(id)
   const { data: history } = useRequestHistory(id)
   const { data: comments } = useRequestComments(id)
+  const { data: sharingHistory } = useRequestSharingHistory(id)
   const addComment = useAddComment(id)
   const uploadCommentAttachment = useUploadCommentAttachment(id)
   const updateRequest = useUpdateRequest(id)
@@ -279,6 +301,22 @@ export function RequestDetail() {
         isSystem: !c.author_id,
         body: c.body,
         isInternal: c.is_internal,
+      })
+    }
+  }
+
+  if (sharingHistory) {
+    for (const s of sharingHistory) {
+      timeline.push({
+        kind: 'sharing',
+        id: s.id,
+        at: s.changed_at,
+        actorName: s.actor?.name ?? null,
+        isSystem: false,
+        fromVisibility: s.from_visibility,
+        toVisibility: s.to_visibility,
+        added: s.added,
+        removed: s.removed,
       })
     }
   }
@@ -749,6 +787,11 @@ export function RequestDetail() {
                         첨부
                       </span>
                     )}
+                    {item.kind === 'sharing' && (
+                      <span className="shrink-0 rounded bg-purple-100 px-1.5 py-0.5 text-xs font-medium text-purple-700">
+                        공유변경
+                      </span>
+                    )}
 
                     {/* 내용 — 한 행, 넘치면 말줄임 */}
                     {item.kind === 'history' && (
@@ -794,6 +837,23 @@ export function RequestDetail() {
                             {Math.ceil(item.fileSize / 1024)} KB
                           </span>
                         )}
+                      </span>
+                    )}
+                    {item.kind === 'sharing' && (
+                      <span className="min-w-0 flex-1 truncate text-gray-700">
+                        {[
+                          item.fromVisibility && item.toVisibility
+                            ? `공개범위 ${visibilityLabel(item.fromVisibility)} → ${visibilityLabel(item.toVisibility)}`
+                            : null,
+                          item.added?.length
+                            ? `추가: ${item.added.map((t) => targetLabel(t)).join(', ')}`
+                            : null,
+                          item.removed?.length
+                            ? `제거: ${item.removed.map((t) => targetLabel(t)).join(', ')}`
+                            : null,
+                        ]
+                          .filter(Boolean)
+                          .join(' · ')}
                       </span>
                     )}
 

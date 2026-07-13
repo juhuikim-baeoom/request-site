@@ -141,6 +141,22 @@ export async function requestDetailRoutes(app: FastifyInstance) {
     return r.rows
   })
 
+  // 공유 범위 변경 이력 — "이 요청을 왜 저 팀이 보고 있지?"에 답하기 위한 것으로
+  // 내부메모와 달리 민감 정보가 아니다. canSeeRequest를 통과하면(=loadForSee) 누구나 볼 수 있다.
+  app.get<{ Params: { id: string } }>('/api/requests/:id/sharing-history', async (request, reply) => {
+    const u = request.currentUser!
+    const id = parseId(request.params.id)
+    if (id === null) { reply.code(404).send({ error: 'not found' }); return }
+    const { found, ok } = await loadForSee(u, id)
+    if (!guard(reply, found, ok)) return
+    const r = await db.execute<any>(sql`
+      select h.id, h.changed_at, h.from_visibility, h.to_visibility, h.added, h.removed,
+             json_build_object('name', a.name) as actor
+      from request_sharing_history h left join users a on a.id = h.changed_by
+      where h.request_id = ${id} order by h.changed_at asc`)
+    return r.rows
+  })
+
   app.get<{ Params: { id: string } }>('/api/requests/:id/attachments', async (request, reply) => {
     const u = request.currentUser!
     const id = parseId(request.params.id)

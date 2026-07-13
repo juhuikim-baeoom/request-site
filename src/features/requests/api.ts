@@ -99,6 +99,24 @@ export function useRequestHistory(id: number) {
   })
 }
 
+export interface SharingHistoryRow {
+  id: number
+  changed_at: string
+  from_visibility: string | null
+  to_visibility: string | null
+  added: Array<{ target_type: string; target_value: string }>
+  removed: Array<{ target_type: string; target_value: string }>
+  actor: { name: string | null } | null // 상태 이력과 같은 형태 (json_build_object)
+}
+
+export function useRequestSharingHistory(id: number) {
+  return useQuery({
+    queryKey: ['requests', 'sharing-history', id],
+    enabled: Number.isFinite(id),
+    queryFn: () => apiGet<SharingHistoryRow[]>(`/api/requests/${id}/sharing-history`),
+  })
+}
+
 export function useRequestAttachments(id: number) {
   return useQuery({
     queryKey: ['requests', 'attachments', id],
