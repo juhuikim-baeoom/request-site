@@ -157,6 +157,18 @@ try {
     console.log('(4) 전체 교체 + added/removed 기록 OK')
   }
 
+  // ── (4b) 열람 권한 회수: (4)에서 배론|상담영업팀이 제거됐으므로 outsider에게는 더 이상 안 보인다
+  //     "공유 추가 → 보인다"(2)만 있고 "공유 제거 → 다시 안 보인다"가 없으면 권한 회수가
+  //     조용히 새는 방향을 놓친다 — 이 확인이 그 반대 방향을 커버한다.
+  {
+    const after = await app.inject({
+      method: 'GET', url: '/api/requests', headers: { cookie: await cookie(outsider) },
+    })
+    const afterIds = (after.json() as any[]).map((r) => Number(r.id))
+    assert.ok(!afterIds.includes(req.id), '공유 대상에서 제거되면 outsider에게 다시 안 보인다')
+    console.log('(4b) 공유 제거 → 열람 회수 OK')
+  }
+
   // ── (5) 변경이 없으면 이력을 남기지 않는다
   {
     const cntBefore = await db.execute<any>(sql`
@@ -244,6 +256,50 @@ try {
     assert.equal(missing.statusCode, 400, 'shared_targets 누락은 400')
     assert.equal(missing.json().code, 'INVALID_SHARED_TARGETS', '컨테이너 오류도 원소 오류와 같은 code 형태')
     console.log('(10) 잘못된 입력(target_type/target_value/누락) 각각 400 OK')
+  }
+
+  // ── (10b) target_value 형식 검증 — 존재하지 않는 직무/기관, 잘못된 구분자는 각각 400.
+  //     빈 문자열만 걸러내던 이전 구현은 오타(예: '없는팀')를 그대로 통과시켜 request_shared_targets에
+  //     영속화하고 있었다(권한 상승은 아니지만 "공유했다고 뜨는데 아무에게도 안 보이는" 상태가 됨).
+  {
+    const unknownFn = await app.inject({
+      method: 'PUT', url: `/api/requests/${req.id}/sharing`,
+      headers: { cookie: await cookie(sysUser) },
+      payload: { visibility: 'private', shared_targets: [{ target_type: 'function', target_value: '없는팀' }] },
+    })
+    assert.equal(unknownFn.statusCode, 400, '존재하지 않는 직무는 400')
+    assert.equal(unknownFn.json().code, 'INVALID_TARGET_VALUE')
+
+    const badFormat = await app.inject({
+      method: 'PUT', url: `/api/requests/${req.id}/sharing`,
+      headers: { cookie: await cookie(sysUser) },
+      payload: { visibility: 'private', shared_targets: [{ target_type: 'dept', target_value: '배움-교학팀' }] },
+    })
+    assert.equal(badFormat.statusCode, 400, '구분자가 틀린 dept 값은 400 (기관|직무 형식 아님)')
+    assert.equal(badFormat.json().code, 'INVALID_TARGET_VALUE')
+
+    const unknownOrg = await app.inject({
+      method: 'PUT', url: `/api/requests/${req.id}/sharing`,
+      headers: { cookie: await cookie(sysUser) },
+      payload: { visibility: 'private', shared_targets: [{ target_type: 'dept', target_value: '없는기관|교학팀' }] },
+    })
+    assert.equal(unknownOrg.statusCode, 400, '존재하지 않는 기관은 400')
+    assert.equal(unknownOrg.json().code, 'INVALID_TARGET_VALUE')
+
+    // 과잉 차단 방지: 정상 값(직무 6종 중 하나, 기관|직무 형식)은 여전히 통과한다
+    const validOk = await app.inject({
+      method: 'PUT', url: `/api/requests/${req.id}/sharing`,
+      headers: { cookie: await cookie(sysUser) },
+      payload: {
+        visibility: 'private',
+        shared_targets: [
+          { target_type: 'function', target_value: '경영지원팀' },
+          { target_type: 'dept', target_value: '허브|기획마케팅팀' },
+        ],
+      },
+    })
+    assert.equal(validOk.statusCode, 200, '정상 값은 여전히 통과한다(과잉 차단 아님)')
+    console.log('(10b) target_value 형식 검증(직무 6종/기관|직무) OK')
   }
 
   // ── (11) 중복 target: 이력(added)에 중복 없이 1건만 기록되고, 대상 테이블도 1행

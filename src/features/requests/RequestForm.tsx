@@ -44,7 +44,6 @@ const FIELD_PRIORITY = [
   'title',
   'urgency',
   'desired_due',
-  'visibility',
 ]
 
 function focusFirstError(errors: FieldErrors) {
@@ -109,7 +108,6 @@ export function RequestForm() {
     setVisibility(next.visibility)
     setFnTargets(next.fnTargets)
     setDeptTargets(next.deptTargets)
-    clearFieldError('visibility')
   }
 
   const isPending = createRequest.isPending
@@ -153,7 +151,6 @@ export function RequestForm() {
       errors['desired_due'] = '희망완료일은 오늘 이후여야 합니다.'
     }
     if (!urgency) errors['urgency'] = '긴급도를 선택해주세요.'
-    if (!visibility) errors['visibility'] = '공개범위를 선택해주세요.'
     for (const field of activeIntakeFields) {
       if (field.required && !intakeValues[field.key]?.trim()) {
         errors[`intake_${field.key}`] = `${field.label}을(를) 입력해주세요.`
@@ -612,11 +609,6 @@ export function RequestForm() {
 
             {/* 공개범위 + 공유대상 */}
             <SharingEditor value={sharingValue} onChange={handleSharingChange} disabled={isPending} />
-            {fieldErrors['visibility'] && (
-              <p id="error-visibility" className={errorCls} role="alert">
-                {fieldErrors['visibility']}
-              </p>
-            )}
 
             {/* 제출 버튼 (데스크톱 — lg 이상) */}
             <div className="hidden border-t border-gray-100 pt-4 lg:block">

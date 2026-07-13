@@ -1,7 +1,9 @@
 import { sql } from 'drizzle-orm'
 import { withUser } from '../db/client.js'
+import { ORGS } from '../http.js'
 
 export type Visibility = 'private' | 'dept' | 'function' | 'org' | 'shared'
+
 // interface가 아닌 type alias — drizzle의 execute<T extends Record<string, unknown>> 제약은
 // 명시적 index signature가 없는 interface를 만족하지 못한다(암묵적 index signature는 object type
 // literal에만 적용). type alias는 object type literal로 취급되어 제약을 만족한다.
@@ -34,6 +36,26 @@ function dedupeTargets(targets: SharedTarget[]): SharedTarget[] {
   return out
 }
 
+// 직무 단위(target_type='function') 큐레이션 6종 — 클라이언트 src/lib/constants.ts의
+// FUNCTION_TARGETS와 동일해야 한다(서버는 클라이언트 코드를 import할 수 없어 사본을 둔다).
+// server/src/http.ts의 ORGS·VISIBILITIES와 같은 관례.
+const FUNCTION_TARGETS = [
+  '교학팀',
+  '상담영업팀',
+  '기획마케팅팀',
+  '상품개발팀',
+  '경영지원팀',
+  '시스템팀',
+] as const
+
+/** dept target_value 형식 검증: '기관|직무' — 기관은 ORGS, 직무는 FUNCTION_TARGETS 중 하나 */
+function isValidDeptTargetValue(v: string): boolean {
+  const parts = v.split('|')
+  if (parts.length !== 2) return false
+  const [org, fn] = parts
+  return (ORGS as readonly string[]).includes(org) && (FUNCTION_TARGETS as readonly string[]).includes(fn)
+}
+
 /**
  * 공유 대상 배열을 검증 + 중복 제거한다.
  * POST /api/requests(생성)와 PUT /api/requests/:id/sharing(사후 수정) 두 경로가 공유하는
@@ -50,6 +72,12 @@ export function parseSharedTargets(raw: unknown[]): SharedTarget[] {
       throw new SharingError('invalid target_type', 'INVALID_TARGET_TYPE')
     }
     if (typeof tv !== 'string' || tv.length === 0) {
+      throw new SharingError('invalid target_value', 'INVALID_TARGET_VALUE')
+    }
+    if (tt === 'function' && !(FUNCTION_TARGETS as readonly string[]).includes(tv)) {
+      throw new SharingError('invalid target_value', 'INVALID_TARGET_VALUE')
+    }
+    if (tt === 'dept' && !isValidDeptTargetValue(tv)) {
       throw new SharingError('invalid target_value', 'INVALID_TARGET_VALUE')
     }
     targets.push({ target_type: tt, target_value: tv })

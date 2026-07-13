@@ -224,25 +224,45 @@ await db.delete(requests).where(eq(requests.id, reqId))
 // 100번째 접수는 n=100 → seq가 '10'으로 잘려 이미 존재하는 10번째 seq와 unique 충돌 → 500,
 // 재시도해도 max(...)는 여전히 99라 그 날짜(KST)가 끝날 때까지 접수가 전면 실패했다.
 // n>=100부터는 자릿수를 그대로 쓰도록 고쳤다.
+//
+// requests.seq는 unique다. 오늘자(KST)에 이미 실접수가 있는 DB에서 d-01부터 그대로 시드하면
+// 그 값과 충돌해 항상 실패한다 — 그래서 d-01 고정 대신, 오늘자 마지막 번호(max)를 먼저 읽어
+// 그 다음 번호부터 99까지만 채운다. 이미 99 이상이면 시드 없이 바로 다음 접수가 100 이상의
+// 번호를 받게 되므로 그 상태로 자릿수 잘림 여부만 확인한다 — 어느 경우든 검증 대상(신규 접수의
+// 채번 번호가 100 이상)은 그대로 재현된다.
 // 99건을 실제로 접수하면 느리므로, 트리거가 보는 max(split_part(seq,'-',2))만 채우도록
-// seq를 직접 insert해 99번까지 존재하는 상황을 구성한다(gen_seq는 new.seq가 이미 있으면
-// 건드리지 않으므로 유효한 재현이다).
+// seq를 직접 insert한다(gen_seq는 new.seq가 이미 있으면 건드리지 않으므로 유효한 재현이다).
 // ──────────────────────────────────────────
 {
   const dRes = await db.execute<{ d: string }>(sql`select to_char(now() at time zone 'Asia/Seoul', 'YYMMDD') as d`)
   const d = dRes.rows[0].d
 
-  const seeded = Array.from({ length: 99 }, (_, i) => ({
-    org: '공통' as const,
-    typeCode: 'feature',
-    title: `seq3자리시드${i + 1}`,
-    seq: `${d}-${String(i + 1).padStart(2, '0')}`,
-  }))
-  const seededRows = await db.insert(requests).values(seeded).returning({ id: requests.id })
-  const seededIds = seededRows.map((r) => r.id)
+  const curRes = await db.execute<{ max_n: number }>(sql`
+    select coalesce(max(split_part(seq, '-', 2)::int), 0) as max_n
+    from requests where seq like ${d + '-%'}`)
+  const curMax = curRes.rows[0].max_n
+
+  // 99 미만이면 다음 번호부터 99까지 채우고, 이미 99 이상이면 추가 시드 없이 진행한다.
+  const seedTo = Math.max(curMax, 99)
+  const expectedN = seedTo + 1 // 다음 접수가 받아야 할 번호 — 항상 100 이상
+  let seededIds: number[] = []
   let newId: number | undefined
 
   try {
+    const seeded = Array.from({ length: seedTo - curMax }, (_, i) => {
+      const n = curMax + 1 + i
+      return {
+        org: '공통' as const,
+        typeCode: 'feature',
+        title: `seq3자리시드${n}`,
+        seq: `${d}-${String(n).padStart(2, '0')}`, // 이 branch의 n은 항상 <=99이므로 lpad와 동치, 잘림 없음
+      }
+    })
+    if (seeded.length > 0) {
+      const seededRows = await db.insert(requests).values(seeded).returning({ id: requests.id })
+      seededIds = seededRows.map((r) => r.id)
+    }
+
     const r100 = await app.inject({
       method: 'POST', url: '/api/requests', cookies,
       payload: {
@@ -251,14 +271,14 @@ await db.delete(requests).where(eq(requests.id, reqId))
         intake_detail: { purpose: '테스트', expected_effect: '테스트' },
       },
     })
-    assert.equal(r100.statusCode, 201, `100번째 접수 실패(회귀): ${JSON.stringify(r100.json())}`)
+    assert.equal(r100.statusCode, 201, `${expectedN}번째 접수 실패(회귀): ${JSON.stringify(r100.json())}`)
     newId = r100.json().id
-    const seq100 = r100.json().seq
-    assert.equal(seq100, `${d}-100`, `100번째 seq는 3자리여야 함(got ${seq100})`)
+    const seqNew = r100.json().seq
+    assert.equal(seqNew, `${d}-${expectedN}`, `${expectedN}번째 seq는 잘리지 않아야 함(got ${seqNew})`)
 
-    const dup = await db.execute<any>(sql`select count(*)::int as c from requests where seq = ${seq100}`)
+    const dup = await db.execute<any>(sql`select count(*)::int as c from requests where seq = ${seqNew}`)
     assert.equal(dup.rows[0].c, 1, 'seq 중복 없음(unique 위반 없이 성공)')
-    console.log(`seq 3-digit regression ok: 99건 시드 후 100번째 seq=${seq100}`)
+    console.log(`seq 3-digit regression ok: 시드 후(오늘자 max=${curMax}) 다음 seq=${seqNew}`)
   } finally {
     const ids = newId ? [...seededIds, newId] : seededIds
     await db.delete(requests).where(inArray(requests.id, ids))
