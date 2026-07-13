@@ -1,7 +1,7 @@
 ---
 title: 완료 검수 단계와 이의제기 설계
-status: draft
-last_updated: 2026-07-12
+status: implemented
+last_updated: 2026-07-13
 ---
 
 # 완료 검수 단계와 이의제기 설계
@@ -255,3 +255,13 @@ forward-only이며 기존 마이그레이션 파일은 편집하지 않는다. d
 
 - 요청자가 퇴사해 계정이 비활성인 검수대기 건은 자동완료 배치가 그대로 처리한다. 별도 처리는 두지 않는다.
 - 검수대기 상태의 건도 `보류`로 갈 수 있어야 하는지는 현재 설계에서 제외했다. 검수 중 보류가 필요하면 요청자가 재작업 요청을 하고 시스템팀이 진행중에서 보류로 보내면 된다.
+
+## 11. 구현 후기 — CSAT 정합화 (2026-07-13)
+
+§7의 "확인했습니다" 서술은 `csat_rating` 컬럼이 "이미 존재하나 채워지는 경로가 없다"고 적었는데, 이는 부정확했다. 실제로는 구현 이전부터 `POST /api/requests/:id/csat` 라우트(`server/src/routes/request-detail.ts`)와 프론트 `useCsat` 훅(`src/features/requests/api.ts`)이 존재했고, 완료 상태에서 요청자가 👍/👎(`rating -1/1`, thumbs 모델)를 직접 제출하는 별도 경로였다.
+
+이 설계가 도입한 1~5점 별점은 새 위젯이 아니라 **기존 thumbs 모델을 대체**하는 것이다. 정합화하며 다음을 함께 정리했다.
+
+- `csat_rating`의 의미를 thumbs(-1/1) → 1~5점 척도로 바꾸고, 대시보드 "만족도" 판정 기준을 `rating >= 4`로 재정의했다.
+- 수집 시점을 요청자가 언제든 누를 수 있던 독립 버튼에서, 검수대기를 확인(`완료`, `completion_route='REQUESTER'`)하는 순간으로 옮겼다.
+- 구 thumbs 엔드포인트 `POST /api/requests/:id/csat`와 `useCsat` 훅은 제거했다. 1-5점 컬럼에 thumbs 값(`-1`/`1`)이 직접 기록될 수 있는 경로를 남겨두면(특히 `AUTO`/`SYSTEM_FORCED`로 완료되어 `csat_rating`이 아직 null인 건에 대해) 대시보드 지표가 조용히 오염될 위험이 있었기 때문이다.

@@ -5,6 +5,24 @@
 ## [Unreleased]
 
 ### Added
+- **검수대기 단계와 완료 후 이의제기** (`server/drizzle/0005_add_inspection_enums.sql` ~ `0008_inspection_reminder.sql`, `server/src/services/transition.ts`, `server/src/routes/disputes.ts`, `server/src/jobs/auto-complete.ts`, `src/features/requests/RequestDetail.tsx`)
+  - `request_status` enum에 `검수대기` 추가(`진행중`과 `보류` 사이). 작업 종료 시 요청자 검수를 거쳐야 완료에 도달한다.
+  - 요청자 검수 승인: 만족도 1~5점 별점(`csat_rating`, 4점 이상=긍정)과 선택 코멘트를 검수 확인 시점에 수집 후 `완료`(`completion_route='REQUESTER'`)로 전이.
+  - 요청자 재작업 요청: 검수대기에서 사유(필수) 입력 후 `진행중`으로 되돌림(`rework_count +1`).
+  - 자동완료 배치: 검수대기 진입 7일 무응답 시 자동 완료(`completion_route='AUTO'`), 3일차에 리마인더 알림 1회 발송(`inspection_reminder_sent_at`).
+  - 시스템팀 강제완료: 검수를 건너뛰고 사유(`completion_note`)와 함께 완료 처리(`completion_route='SYSTEM_FORCED'`).
+  - 이의제기(`request_disputes` 테이블): 완료 후 14일 이내 요청자가 이의 제기 → 시스템팀 심사(수락 시 `완료 → 진행중` 재작업 전이, 기각 시 완료 유지 + 사유 통보). 한 요청당 동시 열린 이의 1건 제한(부분 유니크 인덱스 `request_disputes_one_open`).
+  - 알림: `notification_type`에 `dispute` 추가. 검수대기 진입·3일 리마인더·자동완료·이의 접수·이의 심사 완료 시점에 발송.
+  - 대시보드 신규 지표 4종: 이의제기율, 이의 수락률, 평균 검수 소요일, 완료 경로 분포(`REQUESTER`/`AUTO`/`SYSTEM_FORCED`), 열린 이의 수.
+
+### Changed
+- `진행중 → 완료` 직행 전이를 제거했다. 완료에 도달하려면 반드시 검수대기를 거쳐야 한다.
+- `first_resolved_at`이 최종 완료가 아니라 검수대기 최초 진입 시점을 가리키도록 바꿨다(해결 SLA 판정 기준). `final_resolved_at`/`completed_at`은 요청자가 최종 납득한(완료 확정) 시점을 가리킨다(종결 리드타임 기준). 요청자가 검수를 늦게 해도 팀의 해결 SLA가 부당하게 위반되지 않게 하기 위함.
+- 재작업률(`rework_rate`)이 검수대기 반려(`검수대기 → 진행중`)도 포함하도록 넓어졌다. 완료 → 진행중(이의제기 수락)만 세던 기존 정의보다 넓다.
+- CSAT를 thumbs(👍/👎, `rating -1/1`)에서 1~5점 별점으로 전환했다. 수집 시점도 별도 `/csat` 엔드포인트 호출에서 요청자의 검수 승인 순간으로 이동. 대시보드 "만족도" 지표 기준을 `rating >= 4`로 재정의.
+- 구 thumbs CSAT 엔드포인트 `POST /api/requests/:id/csat`와 프론트 `useCsat` 훅을 제거했다(`server/src/routes/request-detail.ts`, `src/features/requests/api.ts`). CSAT가 1-5점 검수 승인 경로로 대체되며 사용되지 않게 됐고, 완료 상태인 `AUTO`/`SYSTEM_FORCED` 건(`csat_rating` null)에 직접 호출 시 thumbs 값 `-1`이 1-5점 컬럼에 잘못 저장될 위험이 있어 제거했다.
+
+### Added
 - **P7 계정 관리 UI** (`src/features/accounts/Accounts.tsx`, `src/features/accounts/api.ts`)
   - `useUsers` 훅: `GET /api/users` 호출, 30s staleTime.
   - `useUpdateUser(userId)` 훅: `PATCH /api/users/:id` — role/dept/org_affil/dept_function 부분 수정.

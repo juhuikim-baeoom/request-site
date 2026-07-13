@@ -156,18 +156,6 @@ export function useUploadCommentAttachment(requestId: number) {
   })
 }
 
-/** CSAT 제출 (요청자, status='완료'일 때) */
-export function useCsat(requestId: number) {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: (vars: { rating: -1 | 1; comment?: string }) =>
-      apiSend<{ ok: boolean }>('POST', `/api/requests/${requestId}/csat`, vars),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['requests', 'detail', requestId] })
-    },
-  })
-}
-
 /** 재작업: 완료→진행중 전이 (시스템팀 전용) */
 export function useRework(requestId: number) {
   const queryClient = useQueryClient()
