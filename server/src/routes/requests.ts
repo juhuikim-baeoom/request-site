@@ -6,7 +6,8 @@ import { visibilityFilter, isSystem } from '../authz.js'
 import { parseId, isOneOf, ORGS, TYPE_CODES, PRIORITIES, VISIBILITIES } from '../http.js'
 import { changeStatus, TransitionError } from '../services/transition.js'
 import { assignRequest, AssignError } from '../services/assign.js'
-import { changeImpact, ImpactError } from '../services/impact.js'
+import { changeImpact, ImpactError, CLOSED } from '../services/impact.js'
+import { computeSlaFields, loadHolidaySet } from '../services/sla-fields.js'
 import { urgencyResponseLevel, addBusinessMinutes, type Urgency, type Impact } from '../sla.js'
 
 // intake_detail 필수키 맵
@@ -176,6 +177,41 @@ export async function requestRoutes(app: FastifyInstance) {
       if (b[k] !== undefined) sets.push(sql`${sql.raw(k)} = ${b[k]}`)
     }
     if (!sets.length) { reply.code(400); return { error: 'no fields' } }
+
+    // 긴급도 편집은 priority_level = derivePriority(urgency, impact)를 어긋나게 만들 수 있다.
+    // urgency가 실제로 바뀌고, impact가 있으며(=배정된 건), 종결 상태가 아니면
+    // 공용 computeSlaFields로 priority_level·SLA 기한을 재산정한다 (assigned_at·first_response_at·status는 보존).
+    // TOCTOU 방지: SELECT … FOR UPDATE와 재산정 UPDATE를 같은 트랜잭션에서 수행한다 (assign.ts/impact.ts와 동일 관례).
+    if (b.urgency !== undefined) {
+      const holidaySet = await loadHolidaySet()
+      await withUser(u.id, async (tx) => {
+        const cur2 = await tx.execute<{
+          urgency: Urgency
+          impact: Impact | null
+          status: string
+          created_at: string
+        }>(sql`select urgency, impact, status, created_at from requests where id = ${id} for update`)
+        const r2 = cur2.rows[0]
+        if (r2 && r2.impact != null && !CLOSED.includes(r2.status) && b.urgency !== r2.urgency) {
+          const sla = await computeSlaFields({
+            tx,
+            urgency: b.urgency as Urgency,
+            impact: r2.impact,
+            createdAt: r2.created_at,
+            holidaySet,
+          })
+          sets.push(
+            sql`priority_level = ${sla.priorityLevel}`,
+            sql`response_due_at = ${sla.responseDueAt}`,
+            sql`resolution_due_at = ${sla.resolutionDueAt}`,
+            sql`sla_policy_id = ${sla.slaPolicyId}`,
+            sql`sla_response_breached = ${sla.responseBreached}`,
+          )
+        }
+        await tx.execute(sql`update requests set ${sql.join(sets, sql`, `)} where id = ${id}`)
+      })
+      reply.code(200); return { ok: true }
+    }
 
     await withUser(u.id, (tx) =>
       tx.execute(sql`update requests set ${sql.join(sets, sql`, `)} where id = ${id}`))

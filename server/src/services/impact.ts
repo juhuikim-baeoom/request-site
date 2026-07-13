@@ -4,8 +4,8 @@ import { type Impact, type Urgency, type PriorityLevel } from '../sla.js'
 import { computeSlaFields, loadHolidaySet } from './sla-fields.js'
 import { notify } from './notify.js'
 
-/** 종결 상태 — 영향도를 소급 변경하지 않는다 */
-const CLOSED = ['완료', '반려', '철회']
+/** 종결 상태 — 영향도를 소급 변경하지 않는다 (routes/requests.ts 긴급도 편집 재산정 분기도 재사용) */
+export const CLOSED = ['완료', '반려', '철회']
 
 export class ImpactError extends Error {
   code: string
@@ -49,11 +49,13 @@ export async function changeImpact({
     if (!row) {
       throw new ImpactError('요청을 찾을 수 없습니다', 'NOT_FOUND')
     }
-    if (!row.assignee_id) {
-      throw new ImpactError('배정된 요청만 영향도를 조정할 수 있습니다', 'NOT_ASSIGNED')
-    }
+    // CLOSED를 먼저 검사한다: 접수→반려/철회로 직행한 미배정 종결 건은 배정 자체가 영영 불가능하므로
+    // (assignRequest는 status='접수'만 대상) NOT_ASSIGNED보다 CLOSED가 실제 원인을 정확히 알려준다.
     if (CLOSED.includes(row.status)) {
       throw new ImpactError('종결된 요청은 영향도를 조정할 수 없습니다', 'CLOSED')
+    }
+    if (!row.assignee_id) {
+      throw new ImpactError('배정된 요청만 영향도를 조정할 수 있습니다', 'NOT_ASSIGNED')
     }
 
     const sla = await computeSlaFields({

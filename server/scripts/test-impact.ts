@@ -87,7 +87,7 @@ async function makeRequest() {
 }
 
 // ──────────────────────────────────────────
-// (3) 종결 건 거부 (완료)
+// (3) 종결 건 거부 (완료) — 배정된 건
 // ──────────────────────────────────────────
 {
   const req = await makeRequest()
@@ -102,6 +102,31 @@ async function makeRequest() {
   }
   assert.ok(threw, '예외가 발생해야 함')
   console.log('(3) 종결 건 거부 OK')
+  await db.delete(requests).where(eq(requests.id, req.id))
+}
+
+// ──────────────────────────────────────────
+// (3b) 미배정 + 종결 건 → CLOSED (NOT_ASSIGNED 아님)
+// 접수 → 반려로 직행한 미배정 건: assignee_id도 null, status도 종결.
+// CLOSED 검사가 NOT_ASSIGNED보다 먼저 실행되어야 실제 원인(배정 불가한 종결 상태)을 알려준다.
+// ──────────────────────────────────────────
+{
+  const req = await makeRequest()
+  await changeStatus({ reqId: req.id, to: '반려', actorId })
+  const cur = await db.execute<any>(sql`select assignee_id, status from requests where id = ${req.id}`)
+  assert.equal(cur.rows[0].assignee_id, null, '미배정 상태 유지')
+  assert.equal(cur.rows[0].status, '반려', '반려로 직행')
+
+  let threw = false
+  try {
+    await changeImpact({ reqId: req.id, impact: '높음', actorId })
+  } catch (e: any) {
+    assert.ok(e instanceof ImpactError, 'ImpactError여야 함')
+    assert.equal(e.code, 'CLOSED', 'NOT_ASSIGNED가 아니라 CLOSED여야 함')
+    threw = true
+  }
+  assert.ok(threw, '예외가 발생해야 함')
+  console.log('(3b) 미배정 + 종결 건 → CLOSED OK')
   await db.delete(requests).where(eq(requests.id, req.id))
 }
 

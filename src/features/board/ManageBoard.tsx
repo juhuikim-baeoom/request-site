@@ -269,7 +269,8 @@ export function ManageBoard() {
 
   // 드래그 드롭 상태 (HTML5 dragover/drop API)
   const [dragId, setDragId] = useState<number | null>(null)
-  const [dragOverStatus, setDragOverStatus] = useState<RequestStatus | null>(null)
+  // 'queue' = 미배정 큐, RequestStatus = 칸반 컬럼 — 두 영역은 의미가 달라 별도로 하이라이트한다.
+  const [dragOverZone, setDragOverZone] = useState<'queue' | RequestStatus | null>(null)
 
   // 칸반 가로 팬
   const colsRef = useRef<HTMLDivElement>(null)
@@ -288,14 +289,6 @@ export function ManageBoard() {
   )
 
   const deferredQ = useDeferredValue(q)
-
-  const triageQueue = useMemo(
-    () =>
-      (rows ?? []).filter(
-        (r) => r.status === '접수' && !r.assignee_id,
-      ),
-    [rows],
-  )
 
   const filtered = useMemo(() => {
     const query = deferredQ.trim().toLowerCase()
@@ -327,6 +320,13 @@ export function ManageBoard() {
     })
   }, [rows, deferredQ, org, typeCode, due, assignee, showClosed, nameById])
 
+  // 미배정 큐도 filtered를 소스로 써야 필터(기관·담당 등)와 헤더 건수 표시가 일치한다.
+  // 접수는 종결 상태가 아니므로 showClosed 토글과 충돌하지 않는다.
+  const triageQueue = useMemo(
+    () => filtered.filter((r) => r.status === '접수' && !r.assignee_id),
+    [filtered],
+  )
+
   // 접수 컬럼은 '배정된 접수 건'만 담는다.
   // 미배정 접수 건은 상단 미배정 큐가 담당한다 (두 영역은 배타적 — 중복 표시 방지).
   const byStatus = useMemo(() => {
@@ -348,26 +348,28 @@ export function ManageBoard() {
     e.dataTransfer.setData('text/plain', String(id))
   }
 
-  function onDragOver(e: React.DragEvent, status: RequestStatus) {
+  function onDragOver(e: React.DragEvent, zone: 'queue' | RequestStatus) {
     e.preventDefault()
     const row = (rows ?? []).find((r) => r.id === dragId)
     if (!row || !row.status) return
+    const targetStatus: RequestStatus = zone === 'queue' ? '접수' : zone
     const allowed = ALLOWED_TRANSITIONS[row.status as RequestStatus] ?? []
-    if (status === row.status || allowed.includes(status)) {
+    if (targetStatus === row.status || allowed.includes(targetStatus)) {
       e.dataTransfer.dropEffect = 'move'
-      setDragOverStatus(status)
+      setDragOverZone(zone)
     } else {
       e.dataTransfer.dropEffect = 'none'
     }
   }
 
-  function onDrop(e: React.DragEvent, toStatus: RequestStatus) {
+  function onDrop(e: React.DragEvent, zone: 'queue' | RequestStatus) {
     e.preventDefault()
-    setDragOverStatus(null)
+    setDragOverZone(null)
     if (dragId == null) return
     const row = (rows ?? []).find((r) => r.id === dragId)
     if (!row || !row.status) return
     const fromStatus = row.status as RequestStatus
+    const toStatus: RequestStatus = zone === 'queue' ? '접수' : zone
     if (fromStatus === toStatus) return
     const allowed = ALLOWED_TRANSITIONS[fromStatus] ?? []
     if (!allowed.includes(toStatus)) {
@@ -392,7 +394,7 @@ export function ManageBoard() {
 
   function onDragEnd() {
     setDragId(null)
-    setDragOverStatus(null)
+    setDragOverZone(null)
   }
 
   // ---- 칸반 팬 핸들러 ----
@@ -734,13 +736,13 @@ export function ManageBoard() {
       {triageQueue.length > 0 && (
         <div
           className={`rounded-xl border-2 border-dashed p-3 transition-colors ${
-            dragOverStatus === '접수'
+            dragOverZone === 'queue'
               ? 'border-brand bg-brand/5'
               : 'border-amber-300 bg-amber-50/60'
           }`}
-          onDragOver={(e) => onDragOver(e, '접수')}
-          onDragLeave={() => setDragOverStatus(null)}
-          onDrop={(e) => onDrop(e, '접수')}
+          onDragOver={(e) => onDragOver(e, 'queue')}
+          onDragLeave={() => setDragOverZone(null)}
+          onDrop={(e) => onDrop(e, 'queue')}
         >
           <div className="mb-2 flex items-center gap-2">
             <span className="text-sm font-bold text-amber-800">미배정 큐</span>
@@ -748,7 +750,7 @@ export function ManageBoard() {
               {triageQueue.length}
             </span>
           </div>
-          {dragOverStatus === '접수' && (
+          {dragOverZone === 'queue' && (
             <div className="mb-2 flex items-center justify-center rounded-lg border-2 border-dashed border-brand/40 py-4 text-xs text-brand">
               여기에 놓기
             </div>
@@ -869,13 +871,13 @@ export function ManageBoard() {
           {BOARD_STATUSES.map((status) => {
             const cards = byStatus.get(status) ?? []
             const overWip = cards.length > WIP_LIMIT
-            const isDragTarget = dragOverStatus === status
+            const isDragTarget = dragOverZone === status
             return (
               <div
                 key={status}
                 className="w-64 shrink-0"
                 onDragOver={(e) => onDragOver(e, status)}
-                onDragLeave={() => setDragOverStatus(null)}
+                onDragLeave={() => setDragOverZone(null)}
                 onDrop={(e) => onDrop(e, status)}
               >
                 {/* 컬럼 헤더 */}

@@ -28,7 +28,10 @@ export function AdminPanel({
   impact,
   priorityLevel,
 }: AdminPanelProps) {
-  const { data: users } = useUsers()
+  const { data: allUsers } = useUsers()
+  // 담당자 후보는 시스템팀만 — ManageBoard.tsx의 assigneeOptions와 규칙을 일치시킨다.
+  // (일반 staff를 배정하면 공개범위 필터가 assignee_id를 열람 근거로 쓰지 않아 본인이 못 볼 수 있음)
+  const users = (allUsers ?? []).filter((u) => u.role === 'system')
   const changeAssignee = useChangeAssignee()
   const changeStatus = useChangeStatus()
   const changeImpact = useChangeImpact(requestId)
@@ -171,13 +174,14 @@ export function AdminPanel({
               </option>
             ))}
           </select>
-          {!assigneeId && (
-            <p className="mt-1 text-[11px] text-gray-500">배정 후 조정할 수 있습니다.</p>
-          )}
-          {assigneeId && isClosed && (
+          {isClosed ? (
             <p className="mt-1 text-[11px] text-gray-500">
               종결({status})된 요청은 영향도를 조정할 수 없습니다.
             </p>
+          ) : (
+            !assigneeId && (
+              <p className="mt-1 text-[11px] text-gray-500">배정 후 조정할 수 있습니다.</p>
+            )
           )}
         </div>
       </div>
