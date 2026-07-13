@@ -121,6 +121,22 @@ export const VISIBILITY_SHORT: Record<RequestVisibility, string> = {
 export type Urgency = '높음' | '보통' | '낮음'
 export const URGENCY_OPTIONS: Urgency[] = ['높음', '보통', '낮음']
 
+/**
+ * 우선순위 격자 — 서버 server/src/sla.ts의 derivePriority와 동일해야 한다.
+ * urgency(긴급도) × impact(영향도) 격자로 우선순위(P1~P4)를 산정한다 (곱셈 아님).
+ * 클라이언트에서 배정 전 미리보기(예상 우선순위) 용도로만 쓴다 — 실제 값은 서버가 확정한다.
+ */
+export function derivePriorityPreview(urgency: Urgency, impact: Urgency): PriorityLevel {
+  if (impact === '높음' && urgency === '높음') return 'P1'
+  if (impact === '높음' && urgency === '보통') return 'P2'
+  if (impact === '높음' && urgency === '낮음') return 'P3'
+  if (impact === '보통' && urgency === '높음') return 'P2'
+  if (impact === '보통' && urgency === '보통') return 'P3'
+  if (impact === '보통' && urgency === '낮음') return 'P4'
+  if (impact === '낮음' && urgency === '높음') return 'P3'
+  return 'P4'
+}
+
 // 타입별 intake_detail 필드 정의 (서버 계약과 키 정확히 일치)
 export interface IntakeField {
   key: string
@@ -187,4 +203,37 @@ export function deptTargetLabel(org: RequestOrg | string, fn: string): string {
 export function parseDeptTargetValue(value: string): { org: string; fn: string } {
   const [org, fn] = value.split('|')
   return { org: org ?? '', fn: fn ?? '' }
+}
+
+/** 담당자 select 후보 항목 (원 후보 목록 밖에서 편입된 경우 outsideCandidates=true) */
+export interface AssigneeOption {
+  id: string
+  name: string | null
+  email: string
+  outsideCandidates: boolean
+}
+
+/**
+ * 담당자 select 후보 목록 — 담당자 후보(보통 role='system')에 현재 담당자가 없어도
+ * 그 담당자를 옵션으로 편입해 select value가 항상 실제 담당자와 일치하도록 한다.
+ * ManageBoard.tsx의 인라인 select와 AdminPanel.tsx가 같은 규칙을 쓴다.
+ */
+export function withCurrentAssignee<T extends { id: string; name: string | null; email: string }>(
+  candidates: T[],
+  currentAssigneeId: string | null | undefined,
+  allPeople: T[],
+): AssigneeOption[] {
+  const options: AssigneeOption[] = candidates.map((c) => ({
+    id: c.id,
+    name: c.name,
+    email: c.email,
+    outsideCandidates: false,
+  }))
+  if (currentAssigneeId && !candidates.some((c) => c.id === currentAssigneeId)) {
+    const found = allPeople.find((p) => p.id === currentAssigneeId)
+    if (found) {
+      options.push({ id: found.id, name: found.name, email: found.email, outsideCandidates: true })
+    }
+  }
+  return options
 }

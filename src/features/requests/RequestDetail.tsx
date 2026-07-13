@@ -351,6 +351,7 @@ export function RequestDetail() {
           assigneeId={v.assignee_id ?? null}
           impact={(v.impact as ImpactLevel) ?? null}
           priorityLevel={v.priority_level ?? null}
+          urgency={(v.urgency as Urgency) ?? null}
         />
       )}
 

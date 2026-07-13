@@ -1,6 +1,13 @@
 import { useState } from 'react'
 import { useUsers } from '../accounts/api'
-import { ALLOWED_TRANSITIONS, CLOSED_STATUSES, PRIORITY_LEVEL_BADGE } from '../../lib/constants'
+import {
+  ALLOWED_TRANSITIONS,
+  CLOSED_STATUSES,
+  PRIORITY_LEVEL_BADGE,
+  derivePriorityPreview,
+  withCurrentAssignee,
+  type Urgency,
+} from '../../lib/constants'
 import type { PriorityLevel, RequestStatus } from '../../types/database'
 import { useChangeAssignee, useChangeStatus, useChangeImpact, type ImpactLevel } from './api'
 
@@ -15,6 +22,7 @@ interface AdminPanelProps {
   assigneeId: string | null
   impact: ImpactLevel | null
   priorityLevel: string | null
+  urgency: Urgency | null
 }
 
 /**
@@ -27,11 +35,15 @@ export function AdminPanel({
   assigneeId,
   impact,
   priorityLevel,
+  urgency,
 }: AdminPanelProps) {
   const { data: allUsers } = useUsers()
   // 담당자 후보는 시스템팀만 — ManageBoard.tsx의 assigneeOptions와 규칙을 일치시킨다.
   // (일반 staff를 배정하면 공개범위 필터가 assignee_id를 열람 근거로 쓰지 않아 본인이 못 볼 수 있음)
-  const users = (allUsers ?? []).filter((u) => u.role === 'system')
+  const systemUsers = (allUsers ?? []).filter((u) => u.role === 'system')
+  // 현재 담당자가 시스템팀이 아니어도(예: 배정 이후 역할 변경) select 후보에 편입해
+  // value가 실제 담당자와 항상 일치하도록 한다 — ManageBoard.tsx와 같은 규칙(withCurrentAssignee).
+  const users = withCurrentAssignee(systemUsers, assigneeId, allUsers ?? [])
   const changeAssignee = useChangeAssignee()
   const changeStatus = useChangeStatus()
   const changeImpact = useChangeImpact(requestId)
@@ -114,9 +126,10 @@ export function AdminPanel({
             disabled={changeAssignee.isPending}
           >
             <option value="">미배정</option>
-            {(users ?? []).map((u) => (
+            {users.map((u) => (
               <option key={u.id} value={u.id}>
                 {u.name ?? u.email}
+                {u.outsideCandidates ? ' (시스템팀 아님)' : ''}
               </option>
             ))}
           </select>
@@ -170,7 +183,7 @@ export function AdminPanel({
             </option>
             {IMPACTS.map((i) => (
               <option key={i} value={i}>
-                {i}
+                {i} (선택 시 {derivePriorityPreview(urgency ?? '보통', i)})
               </option>
             ))}
           </select>

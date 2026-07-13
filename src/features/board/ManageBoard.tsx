@@ -19,6 +19,9 @@ import {
   WIP_LIMIT,
   CLOSED_STATUSES,
   dueBadgeClass,
+  derivePriorityPreview,
+  withCurrentAssignee,
+  type Urgency,
 } from '../../lib/constants'
 import { fmtDateTime } from '../../lib/format'
 import type { PriorityLevel, RequestOrg, RequestStatus, RequestView } from '../../types/database'
@@ -40,11 +43,6 @@ type ViewMode = 'board' | 'list'
 // ---- 상수 ----
 const DUE_FILTERS = ['기한초과', '임박', '여유'] as const
 const IMPACT_OPTIONS: ImpactLevel[] = ['높음', '보통', '낮음']
-const IMPACT_PRIORITY_PREVIEW: Record<ImpactLevel, string> = {
-  높음: 'P1',
-  보통: 'P2',
-  낮음: 'P3/P4',
-}
 
 // 저장뷰 localStorage 키
 const FILTER_STORAGE_KEY = 'manage_board_filters_v1'
@@ -99,6 +97,7 @@ function useToasts() {
 interface AssignModalProps {
   requestId: number
   title: string
+  urgency: Urgency
   selfId: string | null
   assigneeOptions: { id: string; name: string | null; email: string }[]
   onClose: () => void
@@ -108,6 +107,7 @@ interface AssignModalProps {
 function AssignModal({
   requestId,
   title,
+  urgency,
   selfId,
   assigneeOptions,
   onClose,
@@ -180,7 +180,7 @@ function AssignModal({
               ))}
             </div>
             <p className="mt-1 text-right text-[11px] text-gray-400">
-              예상 우선순위: <strong>{IMPACT_PRIORITY_PREVIEW[impact]}</strong>
+              예상 우선순위: <strong>{derivePriorityPreview(urgency, impact)}</strong>
             </p>
           </div>
         </div>
@@ -259,6 +259,7 @@ export function ManageBoard() {
   const [assignModal, setAssignModal] = useState<{
     id: number
     title: string
+    urgency: Urgency
   } | null>(null)
 
   // 벌크 선택
@@ -378,7 +379,7 @@ export function ManageBoard() {
     }
     // 접수 → 진행중 드롭: 배정 필요
     if (fromStatus === '접수' && toStatus === '진행중') {
-      setAssignModal({ id: dragId, title: row.title ?? '' })
+      setAssignModal({ id: dragId, title: row.title ?? '', urgency: (row.urgency as Urgency | null) ?? '보통' })
       return
     }
     // 낙관적 업데이트
@@ -589,7 +590,7 @@ export function ManageBoard() {
             <span className="text-[10px] font-semibold text-red-500">SLA</span>
           )}
         </div>
-        {/* 담당자 인라인 */}
+        {/* 담당자 인라인 — 현재 담당자가 후보 목록 밖이어도 옵션에 포함해 select가 실제 값을 반영하게 한다 */}
         <div className="mt-2">
           <select
             aria-label="담당자"
@@ -598,9 +599,10 @@ export function ManageBoard() {
             onChange={(e) => r.id != null && handleAssigneeChange(r.id, e.target.value)}
           >
             <option value="">미배정</option>
-            {assigneeOptions.map((p) => (
+            {withCurrentAssignee(assigneeOptions, r.assignee_id, profiles ?? []).map((p) => (
               <option key={p.id} value={p.id}>
                 {p.name ?? p.email}
+                {p.outsideCandidates ? ' (시스템팀 아님)' : ''}
               </option>
             ))}
           </select>
@@ -783,7 +785,14 @@ export function ManageBoard() {
                     <span>{r.type_label}</span>
                   </div>
                   <button
-                    onClick={() => r.id != null && setAssignModal({ id: r.id, title: r.title ?? '' })}
+                    onClick={() =>
+                      r.id != null &&
+                      setAssignModal({
+                        id: r.id,
+                        title: r.title ?? '',
+                        urgency: (r.urgency as Urgency | null) ?? '보통',
+                      })
+                    }
                     className="mt-0.5 w-full rounded-md bg-amber-500 py-1 text-xs font-semibold text-white hover:bg-amber-600"
                   >
                     배정
@@ -1066,8 +1075,11 @@ export function ManageBoard() {
                         }
                       >
                         <option value="">미배정</option>
-                        {assigneeOptions.map((p) => (
-                          <option key={p.id} value={p.id}>{p.name ?? p.email}</option>
+                        {withCurrentAssignee(assigneeOptions, r.assignee_id, profiles ?? []).map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.name ?? p.email}
+                            {p.outsideCandidates ? ' (시스템팀 아님)' : ''}
+                          </option>
                         ))}
                       </select>
                     </td>
@@ -1093,6 +1105,7 @@ export function ManageBoard() {
         <AssignModal
           requestId={assignModal.id}
           title={assignModal.title}
+          urgency={assignModal.urgency}
           selfId={profile?.id ?? null}
           assigneeOptions={assigneeOptions}
           onClose={() => setAssignModal(null)}
