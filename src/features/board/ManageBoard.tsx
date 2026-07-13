@@ -17,6 +17,7 @@ import {
   STATUS_BADGE,
   ALLOWED_TRANSITIONS,
   WIP_LIMIT,
+  CLOSED_STATUSES,
   dueBadgeClass,
 } from '../../lib/constants'
 import { fmtDateTime } from '../../lib/format'
@@ -44,7 +45,6 @@ const IMPACT_PRIORITY_PREVIEW: Record<ImpactLevel, string> = {
   보통: 'P2',
   낮음: 'P3/P4',
 }
-const CLOSED_STATUSES: RequestStatus[] = ['완료', '반려', '철회']
 
 // 저장뷰 localStorage 키
 const FILTER_STORAGE_KEY = 'manage_board_filters_v1'
