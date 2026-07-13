@@ -748,6 +748,11 @@ export function ManageBoard() {
               {triageQueue.length}
             </span>
           </div>
+          {dragOverStatus === '접수' && (
+            <div className="mb-2 flex items-center justify-center rounded-lg border-2 border-dashed border-brand/40 py-4 text-xs text-brand">
+              여기에 놓기
+            </div>
+          )}
           <div className="flex flex-wrap gap-2">
             {triageQueue.map((r) => {
               const priorityLevel = r.priority_level as PriorityLevel | null
