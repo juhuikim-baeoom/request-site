@@ -155,7 +155,16 @@ export async function requestDetailRoutes(app: FastifyInstance) {
       left join request_comments c on c.id = a.comment_id
       where a.request_id = ${id} order by a.created_at asc`)
     return r.rows
-      .filter((row: any) => canSeeComment(u, { isInternal: row._comment_is_internal ?? false, authorId: row._comment_author_id ?? null }))
+      .filter((row: any) => {
+        // comment_id가 없는 일반(요청 본문) 첨부는 그대로 노출한다.
+        if (row.comment_id == null) return true
+        // comment_id는 있는데 조인된 댓글 행이 없다(예: 댓글 삭제로 comment_id가
+        // set null되기 전 시점의 레이스, 또는 이후 댓글 삭제 기능이 생겼을 때) —
+        // is_internal은 NOT NULL이므로 null이면 조인 실패를 의미한다. fail-open으로
+        // "공개"라고 간주하지 않고 fail-closed로 목록에서 제외한다.
+        if (row._comment_is_internal == null) return false
+        return canSeeComment(u, { isInternal: row._comment_is_internal, authorId: row._comment_author_id ?? null })
+      })
       .map(({ _comment_is_internal, _comment_author_id, ...att }: any) => att)
   })
 

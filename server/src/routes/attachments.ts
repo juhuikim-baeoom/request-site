@@ -68,7 +68,10 @@ export async function attachmentRoutes(app: FastifyInstance) {
     if (att.comment_id) {
       const c = await db.execute<any>(sql`select is_internal, author_id from request_comments where id = ${att.comment_id}`)
       const comment = c.rows[0]
-      if (comment && !canSeeComment(u, { isInternal: comment.is_internal, authorId: comment.author_id })) {
+      // fail-closed: comment_id가 있는데 댓글 행을 찾지 못하면(댓글 삭제 등) "공개"로
+      // 통과시키지 않고 거부한다. 지금은 댓글 삭제 엔드포인트가 없어 이 분기가 실행될
+      // 일이 없지만, 나중에 생기는 순간 삭제된 내부메모 첨부가 조용히 공개되는 것을 막는다.
+      if (!comment || !canSeeComment(u, { isInternal: comment.is_internal, authorId: comment.author_id })) {
         reply.code(404).send({ error: 'not found' }); return
       }
     }

@@ -31,7 +31,8 @@
     "test:dashboard": "tsx scripts/test-dashboard.ts",
     "test:users": "tsx scripts/test-users.ts",
     "test:roles": "tsx scripts/test-role-boundaries.ts",
-    "test:notifications": "tsx scripts/test-notifications.ts"
+    "test:notifications": "tsx scripts/test-notifications.ts",
+    "test:bootstrap": "tsx scripts/test-bootstrap-clean-db.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^10.0.1",

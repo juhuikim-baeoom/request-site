@@ -393,6 +393,30 @@ try {
     )
   }
 
+  // ──────────────────────────────────────────
+  // (7) GET /api/profiles — canProcess(system·system_admin)만 (I1 회귀)
+  //     이전에는 authenticate만 걸려 있어 staff를 포함한 전 로그인 사용자에게
+  //     전 계정(id·name·email·role·소속)이 무방비로 노출됐다 — GET /api/users를
+  //     canProcess로 좁힌 경계가 이쪽으로 우회 가능해 무효화되던 지점.
+  // ──────────────────────────────────────────
+  {
+    const r1 = await call(staff.sid, 'GET', '/api/profiles')
+    assert.equal(r1.statusCode, 403, `staff는 /api/profiles 조회 불가, got ${r1.statusCode}`)
+
+    const r2 = await call(exec.sid, 'GET', '/api/profiles')
+    assert.equal(r2.statusCode, 403, `exec는 /api/profiles 조회 불가, got ${r2.statusCode}`)
+
+    // positive controls — 관리 보드(useAllProfiles)의 유일한 소비자가 canProcess 전용 화면이므로
+    const r3 = await call(system.sid, 'GET', '/api/profiles')
+    assert.equal(r3.statusCode, 200, `system은 /api/profiles 조회 가능해야 함, got ${r3.statusCode}`)
+    assert.ok(Array.isArray(r3.json()), '/api/profiles 응답은 배열이어야 함')
+
+    const r4 = await call(systemAdmin.sid, 'GET', '/api/profiles')
+    assert.equal(r4.statusCode, 200, `system_admin은 /api/profiles 조회 가능해야 함, got ${r4.statusCode}`)
+
+    console.log('(7) GET /api/profiles 경계 OK — staff·exec 차단, system·system_admin 허용')
+  }
+
   console.log('\ntest:roles ALL PASSED')
 } finally {
   // 정리 — 단언 실패에도 반드시 실행(다음 실행이 unique 위반으로 죽는 것 방지)
