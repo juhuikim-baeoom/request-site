@@ -210,6 +210,7 @@ try {
       payload: { visibility: 'private' },
     })
     assert.equal(missing.statusCode, 400, 'shared_targets 누락은 400')
+    assert.equal(missing.json().code, 'INVALID_SHARED_TARGETS', '컨테이너 오류도 원소 오류와 같은 code 형태')
     console.log('(10) 잘못된 입력(target_type/target_value/누락) 각각 400 OK')
   }
 

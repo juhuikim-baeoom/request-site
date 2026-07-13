@@ -21,13 +21,27 @@ const create = await app.inject({
 })
 assert.equal(create.statusCode, 201)
 const reqId = create.json().id
-assert.match(create.json().seq, /^\d{6}-\d{2}$/)
+assert.match(create.json().seq, /^\d{6}-\d{2,}$/)
 console.log('create ok seq=', create.json().seq)
 
 // 공유대상 기록 확인
 const st = await db.execute<any>(sql`select count(*)::int as c from request_shared_targets where request_id = ${reqId}`)
 assert.equal(st.rows[0].c, 1)
 console.log('shared target saved ok')
+
+// shared_targets가 배열이 아니면(오입력) 조용히 무시하지 않고 400 (PUT과 컨테이너 검증 대칭)
+const badContainer = await app.inject({
+  method: 'POST', url: '/api/requests', cookies,
+  payload: {
+    org: '공통', type_code: 'feature', priority: '보통', visibility: 'dept',
+    title: 'shared_targets 오입력 테스트', body: '<p>본문</p>',
+    intake_detail: { purpose: '업무 효율화', expected_effect: '처리 속도 향상' },
+    shared_targets: { target_type: 'function', target_value: '교학팀' }, // 배열이 아님
+  },
+})
+assert.equal(badContainer.statusCode, 400, 'shared_targets가 배열이 아니면 400')
+assert.equal(badContainer.json().code, 'INVALID_SHARED_TARGETS', 'PUT과 동일한 code 형태')
+console.log('POST shared_targets non-array → 400 ok')
 
 // 보드 변경 (시스템팀 = 김주희)
 const board = await app.inject({ method: 'PATCH', url: `/api/requests/${reqId}`, cookies, payload: { status: '진행중' } })
@@ -201,6 +215,54 @@ await db.delete(requests).where(eq(requests.id, reqId))
   console.log(`seq gap regression ok: A=${seqA} (B 삭제) C=${seqC} D=${seqD}`)
 
   await db.delete(requests).where(inArray(requests.id, [idA, idC, idD]))
+}
+
+// ──────────────────────────────────────────
+// seq 3자리 회귀 테스트 — 100번째 접수 lpad 잘림 (마이그레이션 0009)
+// PostgreSQL lpad(str, len, fill)은 str이 len보다 길면 왼쪽 패딩이 아니라 오른쪽을 잘라낸다:
+// lpad('100', 2, '0') = '10'. 그래서 0008(갭 내성 채번)이 적용된 뒤에도 하루 99건이 쌓이면
+// 100번째 접수는 n=100 → seq가 '10'으로 잘려 이미 존재하는 10번째 seq와 unique 충돌 → 500,
+// 재시도해도 max(...)는 여전히 99라 그 날짜(KST)가 끝날 때까지 접수가 전면 실패했다.
+// n>=100부터는 자릿수를 그대로 쓰도록 고쳤다.
+// 99건을 실제로 접수하면 느리므로, 트리거가 보는 max(split_part(seq,'-',2))만 채우도록
+// seq를 직접 insert해 99번까지 존재하는 상황을 구성한다(gen_seq는 new.seq가 이미 있으면
+// 건드리지 않으므로 유효한 재현이다).
+// ──────────────────────────────────────────
+{
+  const dRes = await db.execute<{ d: string }>(sql`select to_char(now() at time zone 'Asia/Seoul', 'YYMMDD') as d`)
+  const d = dRes.rows[0].d
+
+  const seeded = Array.from({ length: 99 }, (_, i) => ({
+    org: '공통' as const,
+    typeCode: 'feature',
+    title: `seq3자리시드${i + 1}`,
+    seq: `${d}-${String(i + 1).padStart(2, '0')}`,
+  }))
+  const seededRows = await db.insert(requests).values(seeded).returning({ id: requests.id })
+  const seededIds = seededRows.map((r) => r.id)
+  let newId: number | undefined
+
+  try {
+    const r100 = await app.inject({
+      method: 'POST', url: '/api/requests', cookies,
+      payload: {
+        org: '공통', type_code: 'feature', urgency: '보통', visibility: 'dept',
+        title: 'seq3자리테스트',
+        intake_detail: { purpose: '테스트', expected_effect: '테스트' },
+      },
+    })
+    assert.equal(r100.statusCode, 201, `100번째 접수 실패(회귀): ${JSON.stringify(r100.json())}`)
+    newId = r100.json().id
+    const seq100 = r100.json().seq
+    assert.equal(seq100, `${d}-100`, `100번째 seq는 3자리여야 함(got ${seq100})`)
+
+    const dup = await db.execute<any>(sql`select count(*)::int as c from requests where seq = ${seq100}`)
+    assert.equal(dup.rows[0].c, 1, 'seq 중복 없음(unique 위반 없이 성공)')
+    console.log(`seq 3-digit regression ok: 99건 시드 후 100번째 seq=${seq100}`)
+  } finally {
+    const ids = newId ? [...seededIds, newId] : seededIds
+    await db.delete(requests).where(inArray(requests.id, ids))
+  }
 }
 
 await app.close(); await pool.end()

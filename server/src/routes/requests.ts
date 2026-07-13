@@ -57,6 +57,12 @@ export async function requestRoutes(app: FastifyInstance) {
 
     // 공유 대상 검증 — PUT /api/requests/:id/sharing과 동일한 헬퍼를 공유한다 (계약 통일).
     // 요청 행을 만들기 전에 검증해 잘못된 입력으로 반쪽짜리 요청이 생기는 것을 막는다.
+    // shared_targets가 아예 없으면(undefined) 빈 배열로 취급하지만, 값이 있는데 배열이
+    // 아니면(객체·문자열 등 오입력) PUT과 동일하게 400으로 거부한다 — 조용히 무시하고 201을
+    // 내면 클라이언트는 공유가 설정된 줄 착각하게 된다.
+    if (b.shared_targets !== undefined && !Array.isArray(b.shared_targets)) {
+      reply.code(400); return { error: 'invalid shared_targets', code: 'INVALID_SHARED_TARGETS' }
+    }
     const rawSharedTargets = Array.isArray(b.shared_targets) ? b.shared_targets : []
     let sharedTargets: SharedTarget[]
     try {
@@ -323,7 +329,7 @@ export async function requestRoutes(app: FastifyInstance) {
       }
       const rawTargets = Array.isArray(b.shared_targets) ? b.shared_targets : null
       if (rawTargets == null) {
-        reply.code(400); return { error: 'shared_targets required' }
+        reply.code(400); return { error: 'shared_targets required', code: 'INVALID_SHARED_TARGETS' }
       }
       let targets: SharedTarget[]
       try {

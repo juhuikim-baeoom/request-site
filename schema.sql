@@ -187,10 +187,13 @@ begin new.updated_at = now(); return new; end $$;
 create trigger trg_requests_touch before update on requests
 for each row execute function touch_updated_at();
 
--- 접수번호 생성: YYMMDD-NN (일자별 연번, 예: 260711-03). 날짜는 한국표준시 기준
--- advisory lock으로 동시 접수 시 번호 중복 방지.
+-- 접수번호 생성: YYMMDD-NN (일자별 연번, 예: 260711-03, 100건째부터는 260711-100). 날짜는
+-- 한국표준시 기준. advisory lock으로 동시 접수 시 번호 중복 방지.
 -- 갭 내성: count(*)+1이 아니라 max(마지막 번호)+1로 채번한다. 중간 행이 삭제돼 번호에
 -- 갭이 생겨도 이미 존재하는 seq와 충돌(unique violation)하지 않는다(서버 마이그레이션 0008).
+-- lpad 자릿수: lpad(n::text, 2, '0')은 n>=100이면 왼쪽 패딩이 아니라 오른쪽을 잘라내
+-- (lpad('100',2,'0')='10') 이미 존재하는 seq와 충돌한다. 100 이상은 자릿수를 그대로 쓴다
+-- (서버 마이그레이션 0009).
 create function gen_seq() returns trigger
 language plpgsql as $$
 declare d text := to_char(now() at time zone 'Asia/Seoul', 'YYMMDD'); n int;
@@ -199,7 +202,7 @@ begin
   perform pg_advisory_xact_lock(hashtext('req_seq_' || d));
   select coalesce(max(split_part(seq, '-', 2)::int), 0) + 1 into n
   from requests where seq like d || '-%';
-  new.seq := d || '-' || lpad(n::text, 2, '0');
+  new.seq := d || '-' || case when n < 100 then lpad(n::text, 2, '0') else n::text end;
   return new;
 end $$;
 create trigger trg_requests_seq before insert on requests
