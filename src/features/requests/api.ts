@@ -99,6 +99,24 @@ export function useRequestHistory(id: number) {
   })
 }
 
+export interface SharingHistoryRow {
+  id: number
+  changed_at: string
+  from_visibility: string | null
+  to_visibility: string | null
+  added: Array<{ target_type: string; target_value: string }>
+  removed: Array<{ target_type: string; target_value: string }>
+  actor: { name: string | null } | null // 상태 이력과 같은 형태 (json_build_object)
+}
+
+export function useRequestSharingHistory(id: number) {
+  return useQuery({
+    queryKey: ['requests', 'sharing-history', id],
+    enabled: Number.isFinite(id),
+    queryFn: () => apiGet<SharingHistoryRow[]>(`/api/requests/${id}/sharing-history`),
+  })
+}
+
 export function useRequestAttachments(id: number) {
   return useQuery({
     queryKey: ['requests', 'attachments', id],
@@ -187,11 +205,12 @@ export function useRework(requestId: number) {
 }
 
 // ---------- 본인 접수건 수정 / 철회 ----------
+// visibility는 여기 없다 — PUT /api/requests/:id/sharing 전용(useChangeSharing).
+// 보내면 서버가 400 USE_SHARING_ENDPOINT로 거부한다.
 export interface UpdateRequestInput {
   title?: string
   body?: string
   urgency?: Urgency
-  visibility?: RequestVisibility
   desired_due?: string | null
 }
 
@@ -202,6 +221,24 @@ export function useUpdateRequest(id: number) {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['requests', 'detail', id] })
       void queryClient.invalidateQueries({ queryKey: ['requests', 'view'] })
+    },
+  })
+}
+
+/**
+ * 공유 설정 변경 (시스템팀 또는 요청자 본인, 상태 무관) — 공개범위 + 공유 대상 전체 교체.
+ * PATCH /api/requests/:id 의 visibility는 폐기됐다 — 여기가 유일한 변경 경로다.
+ */
+export function useChangeSharing(id: number) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (vars: { visibility: RequestVisibility; shared_targets: SharedTargetInput[] }) =>
+      apiSend('PUT', `/api/requests/${id}/sharing`, {
+        visibility: vars.visibility,
+        shared_targets: vars.shared_targets,
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['requests'] })
     },
   })
 }
@@ -464,7 +501,7 @@ export function useCreateRequest() {
         body: input.body,
         desired_due: input.desired_due || null,
         intake_detail: input.intake_detail,
-        sharedTargets: input.sharedTargets,
+        shared_targets: input.sharedTargets,
       })
 
       // 2) 첨부 순차 업로드 — 실패해도 요청 중복 생성 없이 failedFiles 수집

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { buildApp } from '../src/app.js'
 import { db, pool } from '../src/db/client.js'
 import { requests, users } from '../src/db/schema.js'
-import { eq, sql } from 'drizzle-orm'
+import { eq, inArray, sql } from 'drizzle-orm'
 import { loginAsDev } from '../src/routes/helpers.js'
 
 const app = await buildApp()
@@ -16,18 +16,32 @@ const create = await app.inject({
     org: '공통', type_code: 'feature', priority: '보통', visibility: 'dept',
     title: 'write 테스트', body: '<p>본문</p>', desired_due: null,
     intake_detail: { purpose: '업무 효율화', expected_effect: '처리 속도 향상' },
-    sharedTargets: [{ target_type: 'function', target_value: '교학팀' }],
+    shared_targets: [{ target_type: 'function', target_value: '교학팀' }],
   },
 })
 assert.equal(create.statusCode, 201)
 const reqId = create.json().id
-assert.match(create.json().seq, /^\d{6}-\d{2}$/)
+assert.match(create.json().seq, /^\d{6}-\d{2,}$/)
 console.log('create ok seq=', create.json().seq)
 
 // 공유대상 기록 확인
 const st = await db.execute<any>(sql`select count(*)::int as c from request_shared_targets where request_id = ${reqId}`)
 assert.equal(st.rows[0].c, 1)
 console.log('shared target saved ok')
+
+// shared_targets가 배열이 아니면(오입력) 조용히 무시하지 않고 400 (PUT과 컨테이너 검증 대칭)
+const badContainer = await app.inject({
+  method: 'POST', url: '/api/requests', cookies,
+  payload: {
+    org: '공통', type_code: 'feature', priority: '보통', visibility: 'dept',
+    title: 'shared_targets 오입력 테스트', body: '<p>본문</p>',
+    intake_detail: { purpose: '업무 효율화', expected_effect: '처리 속도 향상' },
+    shared_targets: { target_type: 'function', target_value: '교학팀' }, // 배열이 아님
+  },
+})
+assert.equal(badContainer.statusCode, 400, 'shared_targets가 배열이 아니면 400')
+assert.equal(badContainer.json().code, 'INVALID_SHARED_TARGETS', 'PUT과 동일한 code 형태')
+console.log('POST shared_targets non-array → 400 ok')
 
 // 보드 변경 (시스템팀 = 김주희)
 const board = await app.inject({ method: 'PATCH', url: `/api/requests/${reqId}`, cookies, payload: { status: '진행중' } })
@@ -163,6 +177,112 @@ await db.delete(requests).where(eq(requests.id, reqId))
   console.log('unassigned urgency edit ok: response_due_at만 재산정, impact/priority_level 미배정 유지')
 
   await db.delete(requests).where(eq(requests.id, unassignedId))
+}
+
+// ──────────────────────────────────────────
+// seq 채번 갭 내성 회귀 테스트 (마이그레이션 0008)
+// gen_seq()가 count(*)+1로 채번하면, 중간 행이 삭제돼 그 날짜 seq 번호열에 갭이 생겼을 때
+// 이미 존재하는 seq와 충돌(unique violation)해 POST /api/requests가 500이 되고, 재시도해도
+// 같은 숫자를 다시 계산하므로 그 날짜가 끝날 때까지 접수가 계속 실패한다.
+// max(마지막 번호)+1로 채번해야 갭이 있어도 항상 성공한다.
+// ──────────────────────────────────────────
+{
+  const mk = () => app.inject({
+    method: 'POST', url: '/api/requests', cookies,
+    payload: {
+      org: '공통', type_code: 'feature', urgency: '보통', visibility: 'dept',
+      title: 'seq갭테스트',
+      intake_detail: { purpose: '테스트', expected_effect: '테스트' },
+    },
+  })
+
+  const rA = await mk(); assert.equal(rA.statusCode, 201)
+  const rB = await mk(); assert.equal(rB.statusCode, 201)
+  const rC = await mk(); assert.equal(rC.statusCode, 201)
+  const idA = rA.json().id, idB = rB.json().id, idC = rC.json().id
+  const seqA = rA.json().seq, seqC = rC.json().seq
+
+  // 중간 행(B) 삭제 → 그 날짜 seq 번호열에 갭 발생
+  await db.delete(requests).where(eq(requests.id, idB))
+
+  // 갭이 있어도 새 접수는 성공해야 하고(500이 아님), 기존 seq와 충돌하지 않아야 한다
+  const rD = await mk()
+  assert.equal(rD.statusCode, 201, `갭 이후 접수 실패(회귀): ${JSON.stringify(rD.json())}`)
+  const idD = rD.json().id
+  const seqD = rD.json().seq
+  assert.notEqual(seqD, seqA, '갭 이후 채번이 기존 seq(A)와 충돌하지 않음')
+  assert.notEqual(seqD, seqC, '갭 이후 채번이 기존 seq(C)와 충돌하지 않음')
+  console.log(`seq gap regression ok: A=${seqA} (B 삭제) C=${seqC} D=${seqD}`)
+
+  await db.delete(requests).where(inArray(requests.id, [idA, idC, idD]))
+}
+
+// ──────────────────────────────────────────
+// seq 3자리 회귀 테스트 — 100번째 접수 lpad 잘림 (마이그레이션 0009)
+// PostgreSQL lpad(str, len, fill)은 str이 len보다 길면 왼쪽 패딩이 아니라 오른쪽을 잘라낸다:
+// lpad('100', 2, '0') = '10'. 그래서 0008(갭 내성 채번)이 적용된 뒤에도 하루 99건이 쌓이면
+// 100번째 접수는 n=100 → seq가 '10'으로 잘려 이미 존재하는 10번째 seq와 unique 충돌 → 500,
+// 재시도해도 max(...)는 여전히 99라 그 날짜(KST)가 끝날 때까지 접수가 전면 실패했다.
+// n>=100부터는 자릿수를 그대로 쓰도록 고쳤다.
+//
+// requests.seq는 unique다. 오늘자(KST)에 이미 실접수가 있는 DB에서 d-01부터 그대로 시드하면
+// 그 값과 충돌해 항상 실패한다 — 그래서 d-01 고정 대신, 오늘자 마지막 번호(max)를 먼저 읽어
+// 그 다음 번호부터 99까지만 채운다. 이미 99 이상이면 시드 없이 바로 다음 접수가 100 이상의
+// 번호를 받게 되므로 그 상태로 자릿수 잘림 여부만 확인한다 — 어느 경우든 검증 대상(신규 접수의
+// 채번 번호가 100 이상)은 그대로 재현된다.
+// 99건을 실제로 접수하면 느리므로, 트리거가 보는 max(split_part(seq,'-',2))만 채우도록
+// seq를 직접 insert한다(gen_seq는 new.seq가 이미 있으면 건드리지 않으므로 유효한 재현이다).
+// ──────────────────────────────────────────
+{
+  const dRes = await db.execute<{ d: string }>(sql`select to_char(now() at time zone 'Asia/Seoul', 'YYMMDD') as d`)
+  const d = dRes.rows[0].d
+
+  const curRes = await db.execute<{ max_n: number }>(sql`
+    select coalesce(max(split_part(seq, '-', 2)::int), 0) as max_n
+    from requests where seq like ${d + '-%'}`)
+  const curMax = curRes.rows[0].max_n
+
+  // 99 미만이면 다음 번호부터 99까지 채우고, 이미 99 이상이면 추가 시드 없이 진행한다.
+  const seedTo = Math.max(curMax, 99)
+  const expectedN = seedTo + 1 // 다음 접수가 받아야 할 번호 — 항상 100 이상
+  let seededIds: number[] = []
+  let newId: number | undefined
+
+  try {
+    const seeded = Array.from({ length: seedTo - curMax }, (_, i) => {
+      const n = curMax + 1 + i
+      return {
+        org: '공통' as const,
+        typeCode: 'feature',
+        title: `seq3자리시드${n}`,
+        seq: `${d}-${String(n).padStart(2, '0')}`, // 이 branch의 n은 항상 <=99이므로 lpad와 동치, 잘림 없음
+      }
+    })
+    if (seeded.length > 0) {
+      const seededRows = await db.insert(requests).values(seeded).returning({ id: requests.id })
+      seededIds = seededRows.map((r) => r.id)
+    }
+
+    const r100 = await app.inject({
+      method: 'POST', url: '/api/requests', cookies,
+      payload: {
+        org: '공통', type_code: 'feature', urgency: '보통', visibility: 'dept',
+        title: 'seq3자리테스트',
+        intake_detail: { purpose: '테스트', expected_effect: '테스트' },
+      },
+    })
+    assert.equal(r100.statusCode, 201, `${expectedN}번째 접수 실패(회귀): ${JSON.stringify(r100.json())}`)
+    newId = r100.json().id
+    const seqNew = r100.json().seq
+    assert.equal(seqNew, `${d}-${expectedN}`, `${expectedN}번째 seq는 잘리지 않아야 함(got ${seqNew})`)
+
+    const dup = await db.execute<any>(sql`select count(*)::int as c from requests where seq = ${seqNew}`)
+    assert.equal(dup.rows[0].c, 1, 'seq 중복 없음(unique 위반 없이 성공)')
+    console.log(`seq 3-digit regression ok: 시드 후(오늘자 max=${curMax}) 다음 seq=${seqNew}`)
+  } finally {
+    const ids = newId ? [...seededIds, newId] : seededIds
+    await db.delete(requests).where(inArray(requests.id, ids))
+  }
 }
 
 await app.close(); await pool.end()

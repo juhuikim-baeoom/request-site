@@ -205,6 +205,9 @@ export const TYPE_HINTS: Record<RequestTypeCode, string> = {
 }
 
 // 추가 공유 — 직무 단위(target_type='function') 선택 항목 (큐레이션된 6종)
+// server/src/http.ts의 FUNCTION_TARGETS 사본과 동일해야 한다(클라이언트는 서버 코드를
+// import할 수 없어 사본을 둔다). 한쪽만 고치면 접수 폼이 서버가 거부하는 값을 렌더하거나
+// 서버가 허용하는 값을 숨기게 되니 두 사본을 함께 바꾼다.
 export const FUNCTION_TARGETS: string[] = [
   '교학팀',
   '상담영업팀',

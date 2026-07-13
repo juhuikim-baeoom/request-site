@@ -40,3 +40,11 @@ export function canSeeInternal(role: Role): boolean {
 export function canSeeAllRequests(role: Role): boolean {
   return role === 'system' || role === 'system_admin' || role === 'exec'
 }
+
+/**
+ * 공유 설정 변경 권한 — 서버 server/src/authz.ts의 canChangeSharing과 동일한 규칙이어야 한다.
+ * 시스템팀 또는 요청자 본인(상태 무관, 종결 후에도).
+ */
+export function canChangeSharing(role: Role, requesterId: string | null, myId: string | null | undefined): boolean {
+  return canProcess(role) || (requesterId != null && myId != null && requesterId === myId)
+}

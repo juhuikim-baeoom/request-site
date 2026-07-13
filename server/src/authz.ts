@@ -101,6 +101,16 @@ export function canSeeRequest(u: CurrentUser, req: ReqRef, shared: SharedRef[]):
 }
 
 /**
+ * 공유 설정(공개범위 + 공유 대상) 변경 권한.
+ * 본문 편집(canProcess 또는 요청자 본인 && 접수)과 규칙이 다르다:
+ * 요청자 본인은 상태와 무관하게(종결 후에도) 공유를 바꿀 수 있다.
+ * 공유는 처리 내용을 바꾸지 않고 "누가 볼 수 있는가"만 바꾸므로 더 넓게 열어도 안전하다.
+ */
+export function canChangeSharing(u: CurrentUser, requesterId: string | null): boolean {
+  return canProcess(u) || (requesterId != null && requesterId === u.id)
+}
+
+/**
  * 목록 조회용 WHERE 필터. `r` 별칭(requests 또는 request_view) 기준.
  * 전체 열람(system·system_admin·exec)은 true.
  * 모니터링 관리자는 본인 소속 범위를 추가로 본다. 소속이 null이면 추가 범위 없음.
