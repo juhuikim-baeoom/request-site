@@ -35,10 +35,17 @@ const requestIds: number[] = []
  * dev-login(/api/auth/dev-login)은 고정 시스템 계정(김주희)만 로그인시키므로 역할별 사용자를
  * 얻을 수 없다 — test-users.ts/test-dashboard.ts 관례를 따라 세션을 직접 만든다.
  */
-async function makeUser(role: Role, label: string): Promise<{ id: string; sid: string }> {
+type OrgAffil = '배움' | '배론' | '허브' | '공통'
+
+async function makeUser(
+  role: Role,
+  label: string,
+  affil?: { orgAffil: OrgAffil; deptFunction: string },
+): Promise<{ id: string; sid: string }> {
   const email = `role-boundary-${label}-${randomBytes(4).toString('hex')}@baeoom.com`
   const [u] = await db.insert(users).values({
-    email, name: `${label} 테스트`, orgAffil: '배움', deptFunction: '교학팀', role,
+    email, name: `${label} 테스트`,
+    orgAffil: affil?.orgAffil ?? '배움', deptFunction: affil?.deptFunction ?? '교학팀', role,
   }).returning()
   userIds.push(u.id)
 
@@ -49,9 +56,13 @@ async function makeUser(role: Role, label: string): Promise<{ id: string; sid: s
   return { id: u.id, sid: app.signCookie(token) }
 }
 
-async function makeRequest(requesterId: string, title: string): Promise<number> {
+async function makeRequest(
+  requesterId: string,
+  title: string,
+  visibility: 'private' | 'dept' | 'function' | 'org' | 'shared' = 'shared',
+): Promise<number> {
   const [r] = await db.insert(requests).values({
-    org: '배움', typeCode: 'error', title, requesterId, visibility: 'shared',
+    org: '배움', typeCode: 'error', title, requesterId, visibility,
   }).returning()
   requestIds.push(r.id)
   return r.id
@@ -179,6 +190,105 @@ try {
     assert.equal(r7.statusCode, 200, `system_admin은 대시보드 가능해야 함, got ${r7.statusCode}`)
 
     console.log('(4) 대시보드 접근 경계 OK — staff·dept_monitor·org_monitor·viewer 차단, exec·system·system_admin 허용')
+  }
+
+  // ──────────────────────────────────────────
+  // (5) GET /api/users — canProcess(system·system_admin)만 (canManageAccounts 아님, 의도적 경계)
+  //     routes/users.ts 주석대로 이 API는 관리 보드/AdminPanel.tsx의 담당자 select가 후보
+  //     목록을 가져오는 데 쓴다. 누군가 "계정 API니까"라며 canManageAccounts로 좁히면
+  //     담당자 배정 UI가 조용히 깨지는데 기존 테스트는 이를 잡지 못했다(리뷰 공백 1).
+  // ──────────────────────────────────────────
+  {
+    const r1 = await call(system.sid, 'GET', '/api/users')
+    assert.equal(
+      r1.statusCode, 200,
+      `system(담당자)은 /api/users 조회 가능해야 함(AdminPanel 담당자 select 의존), got ${r1.statusCode}: ${r1.body}`,
+    )
+    assert.ok(Array.isArray(r1.json()), '/api/users 응답은 배열이어야 함')
+
+    const r2 = await call(systemAdmin.sid, 'GET', '/api/users')
+    assert.equal(r2.statusCode, 200, `system_admin은 /api/users 조회 가능해야 함, got ${r2.statusCode}: ${r2.body}`)
+
+    const r3 = await call(staff.sid, 'GET', '/api/users')
+    assert.equal(r3.statusCode, 403, `staff는 /api/users 조회 불가(canProcess 없음), got ${r3.statusCode}`)
+
+    const r4 = await call(exec.sid, 'GET', '/api/users')
+    assert.equal(r4.statusCode, 403, `exec는 /api/users 조회 불가(canProcess 없음), got ${r4.statusCode}`)
+
+    const r5 = await call(deptMonitor.sid, 'GET', '/api/users')
+    assert.equal(r5.statusCode, 403, `dept_monitor는 /api/users 조회 불가(canProcess 없음), got ${r5.statusCode}`)
+
+    console.log('(5) GET /api/users 경계 OK — system·system_admin 허용(담당자 select 의존), staff·exec·dept_monitor 차단')
+  }
+
+  // ──────────────────────────────────────────
+  // (6) 내부메모(canSeeInternal) + 전체열람(canSeeAllRequests) — 신규 역할 조합 HTTP 검증
+  //     test-comment-internal.ts는 staff/system 두 역할만 다룬다. exec·dept_monitor 조합이
+  //     HTTP 레벨에서 검증되지 않던 공백(리뷰 공백 2)을 메운다.
+  // ──────────────────────────────────────────
+  {
+    // requester = staff(org_affil='배움', dept_function='교학팀', makeUser 기본값)
+    // → deptMonitor(같은 기본 소속)의 모니터링 범위에 걸려 visibility='private'이어도
+    //   요청 자체는 보이되, canSeeInternal이 없으니 내부메모는 걸러져야 한다.
+    const reqInternal = await makeRequest(staff.id, '권한테스트-내부메모경계용', 'private')
+
+    // system(canProcess)이 내부메모 작성
+    const postInternal = await call(system.sid, 'POST', `/api/requests/${reqInternal}/comments`, {
+      body: '민감한내부메모', is_internal: true,
+    })
+    assert.equal(postInternal.statusCode, 201, `내부메모 작성 201, got ${postInternal.statusCode}: ${postInternal.body}`)
+
+    // positive control: system(canSeeInternal=true) — 내부메모가 보여야 함
+    const rSys = await call(system.sid, 'GET', `/api/requests/${reqInternal}/comments`)
+    assert.equal(rSys.statusCode, 200, `system은 댓글 목록 조회 가능해야 함, got ${rSys.statusCode}`)
+    assert.ok(
+      rSys.json().some((c: any) => c.body === '민감한내부메모'),
+      'system(canSeeInternal)에게는 내부메모가 보여야 함(positive control)',
+    )
+
+    // exec: canSeeAllRequests=true → 요청·댓글 목록 접근은 가능(200)하되 canSeeInternal=false → 내부메모 제외
+    const rExec = await call(exec.sid, 'GET', `/api/requests/${reqInternal}/comments`)
+    assert.equal(
+      rExec.statusCode, 200,
+      `exec는 canSeeAllRequests이므로 댓글 목록 접근 가능해야 함, got ${rExec.statusCode}: ${rExec.body}`,
+    )
+    assert.ok(
+      !rExec.json().some((c: any) => c.body === '민감한내부메모'),
+      'exec에게는 내부메모 본문이 보이면 안 됨',
+    )
+
+    // dept_monitor: 모니터링 범위(같은 소속)로 요청 접근은 가능(200)하되 내부메모는 제외
+    const rDm = await call(deptMonitor.sid, 'GET', `/api/requests/${reqInternal}/comments`)
+    assert.equal(
+      rDm.statusCode, 200,
+      `dept_monitor는 같은 소속 요청의 댓글 목록에 접근 가능해야 함, got ${rDm.statusCode}: ${rDm.body}`,
+    )
+    assert.ok(
+      !rDm.json().some((c: any) => c.body === '민감한내부메모'),
+      'dept_monitor에게는 내부메모 본문이 보이면 안 됨',
+    )
+
+    // exec가 타인의 private 요청을 상세 조회할 수 있는지 — canSeeAllRequests=true이므로 200
+    const rExecDetail = await call(exec.sid, 'GET', `/api/requests/${reqInternal}`)
+    assert.equal(
+      rExecDetail.statusCode, 200,
+      `exec는 canSeeAllRequests이므로 타인의 private 요청도 상세 조회 가능해야 함, got ${rExecDetail.statusCode}: ${rExecDetail.body}`,
+    )
+
+    // staff(무관한 부서)는 같은 요청에서 막히는지 — canSeeRequest 실패는 404로 통일(존재 여부 비노출,
+    // request-detail.ts의 guard()). 요청자와 소속이 다른 별도 staff를 만들어 "무관함"을 실제로 반영한다.
+    const unrelatedStaff = await makeUser('staff', 'unrelated', { orgAffil: '배론', deptFunction: '다른팀' })
+    const rUnrelated = await call(unrelatedStaff.sid, 'GET', `/api/requests/${reqInternal}`)
+    assert.equal(
+      rUnrelated.statusCode, 404,
+      `무관한 부서 staff는 타인의 private 요청을 조회할 수 없어야 함(404), got ${rUnrelated.statusCode}`,
+    )
+
+    console.log(
+      '(6) 내부메모(canSeeInternal)·전체열람(canSeeAllRequests) 경계 OK — ' +
+      'system은 내부메모 보임, exec·dept_monitor는 요청은 보되 내부메모 제외, ' +
+      'exec는 타인 private 상세 열람 가능, 무관 부서 staff는 404',
+    )
   }
 
   console.log('\ntest:roles ALL PASSED')
