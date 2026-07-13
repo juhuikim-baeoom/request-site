@@ -7,7 +7,7 @@ import { parseId, isOneOf, ORGS, TYPE_CODES, PRIORITIES, VISIBILITIES } from '..
 import { changeStatus, TransitionError } from '../services/transition.js'
 import { assignRequest, AssignError } from '../services/assign.js'
 import { changeImpact, ImpactError, CLOSED } from '../services/impact.js'
-import { changeSharing, SharingError, type Visibility, type SharedTarget } from '../services/sharing.js'
+import { changeSharing, parseSharedTargets, SharingError, type Visibility, type SharedTarget } from '../services/sharing.js'
 import { computeSlaFields, computeResponseDueAtForUrgency, loadHolidaySet } from '../services/sla-fields.js'
 import { type Urgency, type Impact } from '../sla.js'
 
@@ -55,6 +55,17 @@ export async function requestRoutes(app: FastifyInstance) {
       (b.visibility !== undefined && !isOneOf(VISIBILITIES, b.visibility))
     ) { reply.code(400); return { error: 'invalid enum' } }
 
+    // 공유 대상 검증 — PUT /api/requests/:id/sharing과 동일한 헬퍼를 공유한다 (계약 통일).
+    // 요청 행을 만들기 전에 검증해 잘못된 입력으로 반쪽짜리 요청이 생기는 것을 막는다.
+    const rawSharedTargets = Array.isArray(b.shared_targets) ? b.shared_targets : []
+    let sharedTargets: SharedTarget[]
+    try {
+      sharedTargets = parseSharedTargets(rawSharedTargets)
+    } catch (e: any) {
+      if (e instanceof SharingError) { reply.code(400); return { error: e.message, code: e.code } }
+      throw e
+    }
+
     // intake_detail 필수키 검증
     const typeCode: string = b.type_code
     const required = INTAKE_REQUIRED[typeCode]
@@ -98,8 +109,7 @@ export async function requestRoutes(app: FastifyInstance) {
         )
         returning *`)
       const row = ins.rows[0]
-      const targets = Array.isArray(b.sharedTargets) ? b.sharedTargets : []
-      for (const t of targets) {
+      for (const t of sharedTargets) {
         await tx.execute(sql`
           insert into request_shared_targets (request_id, target_type, target_value)
           values (${row.id}, ${t.target_type}, ${t.target_value})
@@ -315,15 +325,12 @@ export async function requestRoutes(app: FastifyInstance) {
       if (rawTargets == null) {
         reply.code(400); return { error: 'shared_targets required' }
       }
-      const targets: SharedTarget[] = []
-      for (const t of rawTargets as any[]) {
-        if (t?.target_type !== 'function' && t?.target_type !== 'dept') {
-          reply.code(400); return { error: 'invalid target_type' }
-        }
-        if (typeof t.target_value !== 'string' || t.target_value.length === 0) {
-          reply.code(400); return { error: 'invalid target_value' }
-        }
-        targets.push({ target_type: t.target_type, target_value: t.target_value })
+      let targets: SharedTarget[]
+      try {
+        targets = parseSharedTargets(rawTargets)
+      } catch (e: any) {
+        if (e instanceof SharingError) { reply.code(400); return { error: e.message, code: e.code } }
+        throw e
       }
 
       // 권한 판정에 요청자 id가 필요하다

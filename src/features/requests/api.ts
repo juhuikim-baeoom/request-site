@@ -464,7 +464,7 @@ export function useCreateRequest() {
         body: input.body,
         desired_due: input.desired_due || null,
         intake_detail: input.intake_detail,
-        sharedTargets: input.sharedTargets,
+        shared_targets: input.sharedTargets,
       })
 
       // 2) 첨부 순차 업로드 — 실패해도 요청 중복 생성 없이 failedFiles 수집

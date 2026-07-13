@@ -164,6 +164,109 @@ try {
     console.log('(7) PATCH 우회로 차단 OK')
   }
 
+  // ── (8) exec: 요청을 볼 수는 있으나(canSeeAllRequests) canProcess는 아니므로 403
+  //     — "볼 수도 없는 staff"만 커버하던 (1)과 달리 가장 중요한 경계(열람 가능 vs 처리 가능)를 검증한다
+  {
+    const execUser = await mkUser('exec', '허브', '경영지원팀')
+    const res = await app.inject({
+      method: 'PUT', url: `/api/requests/${req.id}/sharing`,
+      headers: { cookie: await cookie(execUser) },
+      payload: { visibility: 'shared', shared_targets: [] },
+    })
+    assert.equal(res.statusCode, 403, 'exec는 볼 수 있어도 공유는 못 바꾼다 (403)')
+    console.log('(8) exec(열람 가능·처리 불가) 403 OK')
+  }
+
+  // ── (9) 없는 요청 id → 404
+  {
+    const res = await app.inject({
+      method: 'PUT', url: '/api/requests/999999999/sharing',
+      headers: { cookie: await cookie(sysUser) },
+      payload: { visibility: 'private', shared_targets: [] },
+    })
+    assert.equal(res.statusCode, 404, '없는 요청 id는 404')
+    console.log('(9) 없는 요청 id 404 OK')
+  }
+
+  // ── (10) 잘못된 target_type / target_value / shared_targets 누락 → 각각 400
+  {
+    const badType = await app.inject({
+      method: 'PUT', url: `/api/requests/${req.id}/sharing`,
+      headers: { cookie: await cookie(sysUser) },
+      payload: { visibility: 'private', shared_targets: [{ target_type: 'bogus', target_value: 'x' }] },
+    })
+    assert.equal(badType.statusCode, 400, '잘못된 target_type은 400')
+
+    const badValue = await app.inject({
+      method: 'PUT', url: `/api/requests/${req.id}/sharing`,
+      headers: { cookie: await cookie(sysUser) },
+      payload: { visibility: 'private', shared_targets: [{ target_type: 'function', target_value: '' }] },
+    })
+    assert.equal(badValue.statusCode, 400, '빈 target_value는 400')
+
+    const missing = await app.inject({
+      method: 'PUT', url: `/api/requests/${req.id}/sharing`,
+      headers: { cookie: await cookie(sysUser) },
+      payload: { visibility: 'private' },
+    })
+    assert.equal(missing.statusCode, 400, 'shared_targets 누락은 400')
+    console.log('(10) 잘못된 입력(target_type/target_value/누락) 각각 400 OK')
+  }
+
+  // ── (11) 중복 target: 이력(added)에 중복 없이 1건만 기록되고, 대상 테이블도 1행
+  {
+    const before = await db.execute<any>(sql`
+      select count(*)::int n from request_sharing_history where request_id = ${req.id}`)
+    const res = await app.inject({
+      method: 'PUT', url: `/api/requests/${req.id}/sharing`,
+      headers: { cookie: await cookie(sysUser) },
+      payload: {
+        visibility: 'org',
+        shared_targets: [
+          { target_type: 'function', target_value: '상품개발팀' },
+          { target_type: 'function', target_value: '상품개발팀' },
+        ],
+      },
+    })
+    assert.equal(res.statusCode, 200)
+
+    const t = await db.execute<any>(sql`
+      select target_type, target_value from request_shared_targets where request_id = ${req.id}`)
+    assert.equal(t.rows.length, 1, '중복 대상은 1행으로 저장')
+
+    const h = await db.execute<any>(sql`
+      select added from request_sharing_history where request_id = ${req.id} order by id desc limit 1`)
+    assert.deepEqual(h.rows[0].added, [{ target_type: 'function', target_value: '상품개발팀' }], 'added는 중복 없이 1건')
+    const after = await db.execute<any>(sql`
+      select count(*)::int n from request_sharing_history where request_id = ${req.id}`)
+    assert.equal(after.rows[0].n, before.rows[0].n + 1, '이력은 1건만 추가')
+    console.log('(11) 중복 target dedupe OK')
+  }
+
+  // ── (12) visibility만 바뀌고 대상은 그대로면 대상 행을 재생성하지 않는다 (id·created_at 보존)
+  {
+    const targetBefore = await db.execute<any>(sql`
+      select id, created_at from request_shared_targets where request_id = ${req.id}`)
+    assert.equal(targetBefore.rows.length, 1)
+
+    const res = await app.inject({
+      method: 'PUT', url: `/api/requests/${req.id}/sharing`,
+      headers: { cookie: await cookie(sysUser) },
+      payload: {
+        visibility: 'dept',
+        shared_targets: [{ target_type: 'function', target_value: '상품개발팀' }],
+      },
+    })
+    assert.equal(res.statusCode, 200)
+
+    const targetAfter = await db.execute<any>(sql`
+      select id, created_at from request_shared_targets where request_id = ${req.id}`)
+    assert.equal(targetAfter.rows.length, 1)
+    assert.equal(targetAfter.rows[0].id, targetBefore.rows[0].id, 'visibility만 바뀌면 대상 행 id가 보존된다')
+    assert.deepEqual(targetAfter.rows[0].created_at, targetBefore.rows[0].created_at, 'created_at도 보존된다')
+    console.log('(12) visibility만 변경 시 대상 행 보존 OK')
+  }
+
   console.log('\ntest:sharing ALL PASSED')
 } finally {
   if (created.reqIds.length) await db.delete(requests).where(inArray(requests.id, created.reqIds))
