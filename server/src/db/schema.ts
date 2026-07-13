@@ -204,3 +204,18 @@ export const requestSharedTargets = pgTable('request_shared_targets', {
   uniq: unique('uq_shared_target').on(t.requestId, t.targetType, t.targetValue),
   requestIdx: index('idx_shared_targets_request').on(t.requestId),
 }))
+
+export const requestSharingHistory = pgTable('request_sharing_history', {
+  id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
+  requestId: bigint('request_id', { mode: 'number' })
+    .notNull()
+    .references(() => requests.id, { onDelete: 'cascade' }),
+  changedBy: uuid('changed_by').references(() => users.id),
+  changedAt: timestamp('changed_at', { withTimezone: true }).notNull().defaultNow(),
+  fromVisibility: text('from_visibility'),
+  toVisibility: text('to_visibility'),
+  added: jsonb('added').notNull().default(sql`'[]'::jsonb`),
+  removed: jsonb('removed').notNull().default(sql`'[]'::jsonb`),
+}, (t) => ({
+  requestIdx: index('idx_sharing_history_request').on(t.requestId),
+}))

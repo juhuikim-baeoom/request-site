@@ -50,6 +50,13 @@
       "when": 1784000000020,
       "tag": "0006_role_backfill_history",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1784000000030,
+      "tag": "0007_request_sharing_history",
+      "breakpoints": true
     }
   ]
 }
