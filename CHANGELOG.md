@@ -4,7 +4,13 @@
 
 ## [Unreleased]
 
+### Added
+- **요청 상세 관리 패널** (`src/features/requests/AdminPanel.tsx`): 시스템팀 전용. 담당자·상태·영향도를 상세 화면에서 직접 변경. 상태는 `ALLOWED_TRANSITIONS` 기준 불허 전이를 select에서 비활성화("(불가)" 표기)하고, 보류·반려는 사유 입력 모달을 거친다. 영향도는 미배정·종결 건에서 비활성(사유 안내 텍스트 표시). 필드 편집(제목·본문·긴급도·희망완료일) 권한이 시스템팀으로 확장(상태 무관하게 편집 가능), 철회 버튼은 `ALLOWED_TRANSITIONS`상 '접수' 상태에서만 노출.
+- **영향도 재조정 API** (`server/src/services/impact.ts`, `PATCH /api/requests/:id/impact`): 시스템팀 전용, body `{ impact: 높음|보통|낮음 }`. 배정 후에도 영향도를 바꿔 `priority_level`·`response_due_at`·`resolution_due_at`·`sla_policy_id`·`sla_response_breached`를 재산정한다(`assigned_at`·`first_response_at`·`status`는 보존). 미배정 건은 400 `NOT_ASSIGNED`, 종결(완료·반려·철회) 건은 400 `CLOSED`로 거부. TOCTOU 방지를 위해 `SELECT … FOR UPDATE` + `UPDATE … WHERE assignee_id is not null` 사용. 회귀 테스트 `server/scripts/test-impact.ts`(`npm run test:impact`) 4건: 재산정·미배정 거부·종결 거부·담당자 알림.
+
 ### Changed
+- **관리보드 접수 영역 분할** (`src/features/board/ManageBoard.tsx`): 미배정 큐는 `status='접수' && assignee_id 없음`, 칸반 접수 컬럼은 `status='접수' && assignee_id 있음`으로 배타 분할해 중복 표시를 제거. 미배정 큐도 드롭 대상으로 추가해, 진행중 카드를 큐나 접수 컬럼에 놓으면 배정 취소(→ 접수)로 처리된다. 드래그 오버 시 "여기에 놓기" 텍스트 표시.
+- **SLA 계산 공용화** (`server/src/services/sla-fields.ts`): 우선순위·기한 계산 로직(`computeSlaFields`, `loadHolidaySet`)을 분리해 배정(`assign.ts`)과 영향도 재조정(`impact.ts`)이 공유. `CLOSED_STATUSES`를 `src/lib/constants.ts`로 단일화(클라이언트 `MyRequests`·`ManageBoard`·`AdminPanel`이 공유; 서버는 별도 런타임이라 `impact.ts` 자체 상수 유지). 동작 변경 없음.
 - **진행중 → 접수 되돌리기(배정 취소) 허용** (`server/src/services/transition.ts`, `src/lib/constants.ts`): 허용 전이 매트릭스에 `진행중 → 접수`를 추가. 관리 보드에서 개별 드래그·리스트 인라인 select·벌크 상태 일괄변경 모두에서 진행중 건을 접수로 되돌릴 수 있다. 이전에는 매트릭스에 없어 서버가 `ILLEGAL_TRANSITION`으로 거부했다.
   - 되돌릴 때 서버가 배정 정보를 초기화한다: `assignee_id`·`impact`·`priority_level`·`assigned_at`·`first_response_at`·`response_due_at`·`resolution_due_at`·`sla_policy_id` → null, `sla_response_breached` → false. 미배정 큐로 복귀하며 재배정이 가능하다(`assignRequest`는 `status='접수'`만 대상으로 삼음).
   - 회귀 테스트 추가: `server/scripts/test-transition.ts` (6) 진행중 → 접수 되돌리기 + 배정 초기화.
