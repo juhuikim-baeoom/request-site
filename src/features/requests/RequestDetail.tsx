@@ -9,18 +9,19 @@ import {
   STATUS_BADGE,
   PRIORITY_LEVEL_BADGE,
   URGENCY_OPTIONS,
-  VISIBILITY_OPTIONS,
   dueBadgeClass,
 } from '../../lib/constants'
 import { fmtDateTime } from '../../lib/format'
-import { canProcess, canSeeInternal } from '../../lib/permissions'
+import { canChangeSharing, canProcess, canSeeInternal } from '../../lib/permissions'
 import type { PriorityLevel, RequestStatus, RequestVisibility } from '../../types/database'
 import type { Urgency } from '../../lib/constants'
 import { AdminPanel } from './AdminPanel'
+import { SharingEditor, type SharingValue } from './SharingEditor'
 import {
   getAttachmentUrl,
   useAddComment,
   useCancelRequest,
+  useChangeSharing,
   useCsat,
   useRequestAttachments,
   useRequestComments,
@@ -100,15 +101,20 @@ export function RequestDetail() {
   const cancelRequest = useCancelRequest(id)
   const csatMutation = useCsat(id)
   const reworkMutation = useRework(id)
+  const changeSharing = useChangeSharing(id)
 
   // 편집 상태
   const [editing, setEditing] = useState(false)
   const [editTitle, setEditTitle] = useState('')
   const [editBody, setEditBody] = useState('')
   const [editUrgency, setEditUrgency] = useState<Urgency>('보통')
-  const [editVisibility, setEditVisibility] = useState<RequestVisibility>('dept')
   const [editDue, setEditDue] = useState('')
   const [actionError, setActionError] = useState<string | null>(null)
+
+  // 공유 범위 수정 상태 — 본문 편집(위)과 권한 조건이 다르므로 분리한다.
+  const [sharingOpen, setSharingOpen] = useState(false)
+  const [sharingDraft, setSharingDraft] = useState<SharingValue | null>(null)
+  const [sharingError, setSharingError] = useState<string | null>(null)
 
   // 타임라인 행 펼침 (코드·로그가 담긴 코멘트 전문 보기)
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
@@ -171,7 +177,6 @@ export function RequestDetail() {
     setEditTitle(v.title ?? '')
     setEditBody(v.body ?? '')
     setEditUrgency((v.urgency as Urgency) ?? '보통')
-    setEditVisibility((v.visibility as RequestVisibility) ?? 'dept')
     setEditDue(v.desired_due ?? '')
     setActionError(null)
     setEditing(true)
@@ -189,7 +194,6 @@ export function RequestDetail() {
         title: editTitle.trim(),
         body: editBody,
         urgency: editUrgency,
-        visibility: editVisibility,
         desired_due: editDue,
       })
       setEditing(false)
@@ -237,6 +241,8 @@ export function RequestDetail() {
 
   const { view: v, requester, assignee, sharedTargets } = data
   const canEdit = canProcessRequest || (v.requester_id === profile?.id && v.status === '접수')
+  // 공유 범위 수정: 시스템팀 또는 요청자 본인 — 상태 무관(진행중·완료 후에도)
+  const canEditSharing = canChangeSharing(profile?.role, v.requester_id ?? null, profile?.id)
   // 철회는 전이 매트릭스상 '접수' 상태에서만 유효 (server/src/services/transition.ts ALLOWED와 동일 기준)
   const canWithdraw = canEdit && (ALLOWED_TRANSITIONS[v.status as RequestStatus] ?? []).includes('철회')
   const isRequester = v.requester_id === profile?.id
@@ -324,15 +330,93 @@ export function RequestDetail() {
           )}
         </div>
         <h1 className="mt-2 text-xl font-bold text-gray-900">{v.title}</h1>
-        <div className="mt-2">
+        <div className="mt-2 flex flex-wrap items-center gap-2">
           {v.visibility && (
             <VisibilityBadge
               visibility={v.visibility as RequestVisibility}
               sharedTargets={sharedTargets}
             />
           )}
+          {canEditSharing && (
+            <button
+              type="button"
+              onClick={() => {
+                // 현재 값으로 초안 초기화 — sharedTargets는 상세 응답에 이미 들어 있다
+                setSharingDraft({
+                  visibility: (v.visibility as RequestVisibility) ?? 'dept',
+                  fnTargets: new Set(
+                    sharedTargets.filter((t) => t.target_type === 'function').map((t) => t.target_value),
+                  ),
+                  deptTargets: new Set(
+                    sharedTargets.filter((t) => t.target_type === 'dept').map((t) => t.target_value),
+                  ),
+                })
+                setSharingError(null)
+                setSharingOpen(true)
+              }}
+              className="rounded-md border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
+            >
+              공유 범위 수정
+            </button>
+          )}
         </div>
       </div>
+
+      {/* 공유 범위 수정 패널 — 본문 편집 폼과 분리(권한 조건이 다름: 시스템팀 또는 요청자 본인, 상태 무관) */}
+      {sharingOpen && sharingDraft && (
+        <section aria-label="공유 범위 수정" className="rounded-xl border border-gray-200 bg-white p-4">
+          {sharingError && (
+            <p role="alert" className="mb-2 rounded-md bg-red-50 px-3 py-2 text-xs text-red-700">
+              {sharingError}
+            </p>
+          )}
+          <SharingEditor
+            value={sharingDraft}
+            onChange={setSharingDraft}
+            disabled={changeSharing.isPending}
+          />
+          <div className="mt-4 flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setSharingOpen(false)}
+              className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
+            >
+              취소
+            </button>
+            <button
+              type="button"
+              disabled={changeSharing.isPending}
+              onClick={() => {
+                if (!sharingDraft) return
+                setSharingError(null)
+                changeSharing.mutate(
+                  {
+                    visibility: sharingDraft.visibility,
+                    shared_targets: [
+                      ...[...sharingDraft.fnTargets].map((tv) => ({
+                        target_type: 'function' as const,
+                        target_value: tv,
+                      })),
+                      ...[...sharingDraft.deptTargets].map((tv) => ({
+                        target_type: 'dept' as const,
+                        target_value: tv,
+                      })),
+                    ],
+                  },
+                  {
+                    onSuccess: () => setSharingOpen(false),
+                    onError: (err) =>
+                      setSharingError(err instanceof Error ? err.message : String(err)),
+                  },
+                )
+              }}
+              className="rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-50"
+            >
+              저장
+            </button>
+          </div>
+        </section>
+      )}
 
       {/* SLA + 담당자·우선순위 요약 */}
       <div className="flex flex-wrap items-center gap-4 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm">
@@ -464,7 +548,7 @@ export function RequestDetail() {
               maxLength={200}
             />
           </div>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
               <label className="block text-sm font-medium text-gray-700">긴급도</label>
               <select
@@ -475,20 +559,6 @@ export function RequestDetail() {
                 {URGENCY_OPTIONS.map((u) => (
                   <option key={u} value={u}>
                     {u}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700">공개범위</label>
-              <select
-                className={fieldCls}
-                value={editVisibility}
-                onChange={(e) => setEditVisibility(e.target.value as RequestVisibility)}
-              >
-                {VISIBILITY_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
                   </option>
                 ))}
               </select>

@@ -187,11 +187,12 @@ export function useRework(requestId: number) {
 }
 
 // ---------- 본인 접수건 수정 / 철회 ----------
+// visibility는 여기 없다 — PUT /api/requests/:id/sharing 전용(useChangeSharing).
+// 보내면 서버가 400 USE_SHARING_ENDPOINT로 거부한다.
 export interface UpdateRequestInput {
   title?: string
   body?: string
   urgency?: Urgency
-  visibility?: RequestVisibility
   desired_due?: string | null
 }
 
@@ -202,6 +203,24 @@ export function useUpdateRequest(id: number) {
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ['requests', 'detail', id] })
       void queryClient.invalidateQueries({ queryKey: ['requests', 'view'] })
+    },
+  })
+}
+
+/**
+ * 공유 설정 변경 (시스템팀 또는 요청자 본인, 상태 무관) — 공개범위 + 공유 대상 전체 교체.
+ * PATCH /api/requests/:id 의 visibility는 폐기됐다 — 여기가 유일한 변경 경로다.
+ */
+export function useChangeSharing(id: number) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (vars: { visibility: RequestVisibility; shared_targets: SharedTargetInput[] }) =>
+      apiSend('PUT', `/api/requests/${id}/sharing`, {
+        visibility: vars.visibility,
+        shared_targets: vars.shared_targets,
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['requests'] })
     },
   })
 }
