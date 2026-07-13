@@ -11,6 +11,7 @@
  * 새로 만든다(예: request_site_bootstrap_<hex>). migrate/seed는 별도 프로세스로 실행해
  * 이미 로드된 db/client.js의 커넥션 풀(다른 DATABASE_URL로 고정됨)과 완전히 분리한다.
  */
+import 'dotenv/config'
 import assert from 'node:assert/strict'
 import { randomBytes } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
