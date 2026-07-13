@@ -2,6 +2,7 @@ import { NavLink } from 'react-router-dom'
 import { useAuth } from '../auth/useAuth'
 import type { UserRole } from '../types/database'
 import { NotificationBell } from './NotificationBell'
+import { ROLE_LABEL } from '../lib/constants'
 
 interface NavItem {
   to: string
@@ -16,12 +17,6 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/dashboard', label: '통계', roles: ['system', 'viewer'] },
   { to: '/accounts', label: '계정 관리', roles: ['system'] },
 ]
-
-const ROLE_LABEL: Record<UserRole, string> = {
-  staff: '일반직원',
-  system: '시스템팀',
-  viewer: '열람',
-}
 
 export function TopNav() {
   const { profile, role, signOut } = useAuth()

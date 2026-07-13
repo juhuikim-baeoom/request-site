@@ -1,6 +1,6 @@
 ---
 title: DB 스키마 설계 (Drizzle + Postgres)
-last_updated: 2026-07-12
+last_updated: 2026-07-13
 status: Active
 owner: 시스템팀
 diataxis: reference
@@ -20,7 +20,7 @@ source_of_truth: server/src/db/schema.ts, server/drizzle/0001_triggers.sql
 
 | 테이블 | 역할 | 핵심 |
 | --- | --- | --- |
-| `users` | 직원 계정·역할·소속 | role = staff / system / viewer |
+| `users` | 직원 계정·역할·소속 | role = staff / system / viewer(폐기) / dept_monitor / org_monitor / exec / system_admin |
 | `sessions` | 서버 세션 | 쿠키는 랜덤 토큰만 저장, 로그아웃·무효화 가능 |
 | `org_directory` | 조직도 사전등록 | synced 여부로 계정 생성 연동 |
 | `request_types` | 요청 유형 코드 | 오류 / 기능요청 / 데이터추출 / 파일변경 |
@@ -47,7 +47,14 @@ source_of_truth: server/src/db/schema.ts, server/drizzle/0001_triggers.sql
 | `request_org` | 배움 / 배론 / 허브 / 공통 |
 | `request_source` | web / email |
 | `request_visibility` | private / dept / function / org / shared |
-| `user_role` | staff / system / viewer |
+| `user_role` | staff / system / viewer(폐기, 신규 부여 금지) / dept_monitor / org_monitor / exec / system_admin |
+
+`user_role`은 0005/0006 마이그레이션(`server/drizzle/0005_role_model_add_values.sql`,
+`0006_role_model_migrate_users.sql`)에서 `dept_monitor`·`org_monitor`·`exec`·`system_admin` 4종을
+추가했다. 기존 `viewer` 사용자는 `exec`로 이전되었고 `juhuikim@baeoom.com`은 `system_admin`으로
+승격되었다. `viewer` 값 자체는 Postgres가 enum 값 제거를 지원하지 않아 forward-only로 남겨두되
+신규 부여는 하지 않는다. 이 6개 역할에 대한 접근 제어(authz) 로직 확장은 후속 작업 범위이며,
+아래 §8 표는 아직 `staff`/`system`/`viewer` 3역할 기준의 현행 동작을 반영한다.
 
 ---
 

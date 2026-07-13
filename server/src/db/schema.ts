@@ -4,7 +4,15 @@ import {
 } from 'drizzle-orm/pg-core'
 import { sql } from 'drizzle-orm'
 
-export const userRole = pgEnum('user_role', ['staff', 'system', 'viewer'])
+export const userRole = pgEnum('user_role', [
+  'staff',
+  'system',
+  'viewer', // 폐기 — 신규 부여 금지. 기존 행 호환을 위해 값만 유지한다.
+  'dept_monitor',
+  'org_monitor',
+  'exec',
+  'system_admin',
+])
 export const requestOrg = pgEnum('request_org', ['배움', '배론', '허브', '공통'])
 export const requestStatus = pgEnum('request_status', [
   '접수', '진행중', '보류', '완료', '반려', '철회',
