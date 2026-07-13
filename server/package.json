@@ -24,6 +24,7 @@
     "test:sla": "tsx scripts/test-sla.ts",
     "test:transition": "tsx scripts/test-transition.ts",
     "test:assign": "tsx scripts/test-assign.ts",
+    "test:impact": "tsx scripts/test-impact.ts",
     "test:intake": "tsx scripts/test-intake.ts",
     "test:comment-internal": "tsx scripts/test-comment-internal.ts",
     "test:comment-attach": "tsx scripts/test-comment-attach.ts",

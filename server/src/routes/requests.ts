@@ -6,6 +6,7 @@ import { visibilityFilter, isSystem } from '../authz.js'
 import { parseId, isOneOf, ORGS, TYPE_CODES, PRIORITIES, VISIBILITIES } from '../http.js'
 import { changeStatus, TransitionError } from '../services/transition.js'
 import { assignRequest, AssignError } from '../services/assign.js'
+import { changeImpact, ImpactError } from '../services/impact.js'
 import { urgencyResponseLevel, addBusinessMinutes, type Urgency, type Impact } from '../sla.js'
 
 // intake_detail 필수키 맵
@@ -206,4 +207,36 @@ export async function requestRoutes(app: FastifyInstance) {
 
     reply.code(200); return { ok: true }
   })
+
+  // 영향도 재조정 — 시스템팀 전용. priority_level·SLA 기한 재산정.
+  app.patch<{ Params: { id: string }; Body: { impact?: string } }>(
+    '/api/requests/:id/impact',
+    async (request, reply) => {
+      const u = request.currentUser!
+      if (!isSystem(u)) { reply.code(403); return { error: 'forbidden' } }
+
+      const id = Number(request.params.id)
+      if (!Number.isInteger(id)) { reply.code(400); return { error: 'invalid id' } }
+
+      const b = request.body ?? {}
+      if (!isOneOf(PRIORITIES, b.impact as string)) {
+        reply.code(400); return { error: 'impact(높음|보통|낮음) required' }
+      }
+
+      try {
+        const { priorityLevel } = await changeImpact({
+          reqId: id,
+          impact: b.impact as Impact,
+          actorId: u.id,
+        })
+        reply.code(200); return { ok: true, priority_level: priorityLevel }
+      } catch (e: any) {
+        if (e instanceof ImpactError) {
+          if (e.code === 'NOT_FOUND') { reply.code(404); return { error: 'not found' } }
+          reply.code(400); return { error: e.message, code: e.code }
+        }
+        throw e
+      }
+    },
+  )
 }
