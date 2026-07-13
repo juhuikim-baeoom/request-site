@@ -2,13 +2,7 @@ import { useRef, useState } from 'react'
 import { useUsers, useUpdateUser, useImportOrgDirectory } from './api'
 import type { UserRow, UpdateUserInput, OrgDirectoryRow } from './api'
 import type { UserRole, RequestOrg } from '../../types/database'
-import { ORG_OPTIONS } from '../../lib/constants'
-
-const ROLE_OPTIONS: { value: UserRole; label: string }[] = [
-  { value: 'staff', label: '일반직원' },
-  { value: 'system', label: '시스템팀' },
-  { value: 'viewer', label: '열람' },
-]
+import { ORG_OPTIONS, ROLE_LABEL, ASSIGNABLE_ROLES } from '../../lib/constants'
 
 const ORG_LABEL: Record<RequestOrg, string> = {
   배움: '배움',
@@ -64,14 +58,14 @@ function UserRow({
         <td className="px-3 py-2.5 text-sm">
           <span
             className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${
-              user.role === 'system'
+              user.role === 'system' || user.role === 'system_admin'
                 ? 'bg-indigo-100 text-indigo-700'
                 : user.role === 'viewer'
                   ? 'bg-amber-100 text-amber-700'
                   : 'bg-gray-100 text-gray-600'
             }`}
           >
-            {ROLE_OPTIONS.find((r) => r.value === user.role)?.label ?? user.role}
+            {ROLE_LABEL[user.role] ?? user.role}
           </span>
         </td>
         <td className="px-3 py-2.5 text-sm">
@@ -141,9 +135,9 @@ function UserRow({
           className="w-full rounded border border-gray-300 px-2 py-1 text-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
           aria-label="역할"
         >
-          {ROLE_OPTIONS.map((r) => (
-            <option key={r.value} value={r.value}>
-              {r.label}
+          {ASSIGNABLE_ROLES.map((r) => (
+            <option key={r} value={r}>
+              {ROLE_LABEL[r]}
             </option>
           ))}
         </select>

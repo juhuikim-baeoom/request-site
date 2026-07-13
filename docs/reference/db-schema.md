@@ -31,6 +31,7 @@ source_of_truth: server/src/db/schema.ts, server/drizzle/0001_triggers.sql
 | `request_status_history` | 상태 변경 이력 | 트리거 자동 기록, changed_by = app.user_id |
 | `request_attachments` | 첨부 메타 | commentId(nullable) 연결 가능 |
 | `request_shared_targets` | 공유 대상 | visibility='shared'일 때 대상 목록 |
+| `role_backfill_history` | 백필 적용 이력 마커 | `backfill_key` PK — `server/src/db/backfill-roles.ts`가 최초 1회만 실행되도록 원자적으로 claim |
 
 관계: `requests` 1→N `comments` / `history` / `attachments` / `shared_targets`.
 `requests.parent_request_id`로 하위건 자기참조 연결.
@@ -49,12 +50,21 @@ source_of_truth: server/src/db/schema.ts, server/drizzle/0001_triggers.sql
 | `request_visibility` | private / dept / function / org / shared |
 | `user_role` | staff / system / viewer(폐기, 신규 부여 금지) / dept_monitor / org_monitor / exec / system_admin |
 
-`user_role`은 0005/0006 마이그레이션(`server/drizzle/0005_role_model_add_values.sql`,
-`0006_role_model_migrate_users.sql`)에서 `dept_monitor`·`org_monitor`·`exec`·`system_admin` 4종을
-추가했다. 기존 `viewer` 사용자는 `exec`로 이전되었고 `juhuikim@baeoom.com`은 `system_admin`으로
-승격되었다. `viewer` 값 자체는 Postgres가 enum 값 제거를 지원하지 않아 forward-only로 남겨두되
-신규 부여는 하지 않는다. 이 6개 역할에 대한 접근 제어(authz) 로직 확장은 후속 작업 범위이며,
-아래 §8 표는 아직 `staff`/`system`/`viewer` 3역할 기준의 현행 동작을 반영한다.
+`user_role`은 `server/drizzle/0005_role_model_add_values.sql`(`ALTER TYPE ... ADD VALUE`)에서
+`dept_monitor`·`org_monitor`·`exec`·`system_admin` 4종을 추가했다. 이 값들을 사용하는 데이터
+이전(`viewer`→`exec`, `juhuikim@baeoom.com`→`system_admin`)은 마이그레이션 파일이 아니라
+`server/src/db/backfill-roles.ts`의 백필로 구현되어 있다(이유는 §10 교훈 참조). `viewer` 값
+자체는 Postgres가 enum 값 제거를 지원하지 않아 forward-only로 남겨두되 신규 부여는 하지 않는다.
+
+이 백필은 **최초 1회만 실행**된다. `server/drizzle/0006_role_backfill_history.sql`이 만든
+`role_backfill_history` 테이블에 고정 키(`role_model_v1`)를 원자적으로 claim(`INSERT ... ON
+CONFLICT DO NOTHING RETURNING`)하고, claim에 성공했을 때만 실제 UPDATE를 수행한다. `migrate.ts`는
+`npm run db:migrate`(= 배포)마다 백필 함수를 호출하지만, 이미 적용된 DB에서는 claim이 0행을
+반환해 UPDATE 자체를 건너뛰므로 관리자가 계정 관리 화면에서 수동으로 바꾼 역할이 다음 배포에서
+되살아나지 않는다.
+
+이 6개 역할에 대한 접근 제어(authz) 로직 확장은 후속 작업 범위이며, 아래 §8 표는 아직
+`staff`/`system`/`viewer` 3역할 기준의 현행 동작을 반영한다.
 
 ---
 
@@ -184,4 +194,6 @@ npm run db:smoke     # seq 생성·상태이력·뷰 조회 검증
 
 enum 값 변경 필요 시 drizzle 파일 전체 재생성 후 DB 초기화.
 
-**교훈**: `ALTER TYPE ... ADD VALUE`로 추가한 enum 값은 같은 트랜잭션 안에서 사용(SELECT/UPDATE 등)할 수 없다. drizzle-orm 마이그레이터(`drizzle-orm/node-postgres/migrator`)는 대기 중인 모든 마이그레이션 파일을 단일 트랜잭션으로 묶어 실행하므로, 값 추가와 그 값을 쓰는 데이터 이전을 파일만 나눠서는 우회할 수 없다 — **값 추가는 마이그레이션, 그 값을 쓰는 데이터 이전은 `migrate()` 완료(트랜잭션 커밋) 후 실행되는 멱등 백필**(예: `server/src/db/backfill-roles.ts`, `server/src/db/migrate.ts`에서 호출)로 분리한다.
+**교훈 1**: `ALTER TYPE ... ADD VALUE`로 추가한 enum 값은 같은 트랜잭션 안에서 사용(SELECT/UPDATE 등)할 수 없다. drizzle-orm 마이그레이터(`drizzle-orm/node-postgres/migrator`)는 대기 중인 모든 마이그레이션 파일을 단일 트랜잭션으로 묶어 실행하므로, 값 추가와 그 값을 쓰는 데이터 이전을 파일만 나눠서는 우회할 수 없다 — **값 추가는 마이그레이션, 그 값을 쓰는 데이터 이전은 `migrate()` 완료(트랜잭션 커밋) 후 실행되는 백필**(예: `server/src/db/backfill-roles.ts`, `server/src/db/migrate.ts`에서 호출)로 분리한다.
+
+**교훈 2**: 위 백필은 `migrate.ts`가 `npm run db:migrate`(= 배포)마다 호출한다. 백필이 조건절(`WHERE role='viewer'` 등)만으로 멱등을 흉내 내면, 그 조건이 "이메일 == 특정 값"처럼 사용자가 이후에 임의로 바꿀 수 있는 값을 대상으로 할 때 문제가 생긴다 — 관리자가 화면에서 역할을 바꿔도 다음 배포에서 조건이 다시 참이 되어 백필이 그 값을 조용히 덮어쓴다. 그래서 백필은 **적용 여부 자체를 별도 이력 테이블(`role_backfill_history`, `server/drizzle/0006_role_backfill_history.sql`)에 원자적으로 기록**하고, 이미 적용됐으면(= 이력에 키가 존재하면) 대상 조건과 무관하게 무조건 스킵한다. "재실행해도 안전"(idempotent)과 "최초 1회만 실행"(one-shot)은 다른 요구사항이며, 이후 사람이 수정할 수 있는 데이터를 다루는 백필은 후자를 만족해야 한다.

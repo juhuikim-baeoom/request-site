@@ -186,6 +186,14 @@ export const notifications = pgTable('notifications', {
   userReadIdx: index('idx_notifications_user_read').on(t.userId, t.isRead),
 }))
 
+// 백필(server/src/db/backfill-roles.ts)이 최초 1회만 실행되도록 남기는 이력 마커.
+// backfillKey를 원자적으로 claim(INSERT ... ON CONFLICT DO NOTHING)해, 이미 적용된 DB에서는
+// 재실행해도 UPDATE 자체를 건너뛴다 — 관리자가 수동으로 바꾼 역할이 되살아나지 않게 하기 위함.
+export const roleBackfillHistory = pgTable('role_backfill_history', {
+  backfillKey: text('backfill_key').primaryKey(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
 export const requestSharedTargets = pgTable('request_shared_targets', {
   id: bigint('id', { mode: 'number' }).primaryKey().generatedAlwaysAsIdentity(),
   requestId: bigint('request_id', { mode: 'number' }).notNull().references(() => requests.id, { onDelete: 'cascade' }),
