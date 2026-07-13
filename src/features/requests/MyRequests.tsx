@@ -295,7 +295,7 @@ export function MyRequests() {
                   </th>
                   <td className="px-3 py-2">
                     <Link
-                      to={`/requests/${r.id}`}
+                      to={`/requests/${r.id}?from=mine`}
                       className="font-medium text-gray-900 hover:text-brand hover:underline"
                     >
                       {r.title}
@@ -388,7 +388,7 @@ export function MyRequests() {
 
               {/* 제목 */}
               <Link
-                to={`/requests/${r.id}`}
+                to={`/requests/${r.id}?from=mine`}
                 className="block font-medium text-gray-900 hover:text-brand hover:underline"
               >
                 {r.title}

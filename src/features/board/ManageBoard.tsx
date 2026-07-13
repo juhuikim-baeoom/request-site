@@ -555,7 +555,7 @@ export function ManageBoard() {
           </span>
         </div>
         <Link
-          to={`/requests/${r.id}`}
+          to={`/requests/${r.id}?from=board`}
           className="mt-1 block truncate text-sm font-semibold text-gray-900 hover:text-brand hover:underline"
           title={r.title ?? ''}
         >
@@ -774,7 +774,7 @@ export function ManageBoard() {
                     <span className="ml-auto font-mono text-[11px] text-gray-400">{r.seq}</span>
                   </div>
                   <Link
-                    to={`/requests/${r.id}`}
+                    to={`/requests/${r.id}?from=board`}
                     className="truncate text-sm font-semibold text-gray-900 hover:text-brand hover:underline"
                     title={r.title ?? ''}
                   >
@@ -991,7 +991,7 @@ export function ManageBoard() {
                     </td>
                     <td className="px-3 py-2">
                       <Link
-                        to={`/requests/${r.id}`}
+                        to={`/requests/${r.id}?from=board`}
                         className="font-medium text-gray-900 hover:text-brand hover:underline"
                       >
                         {r.title}
