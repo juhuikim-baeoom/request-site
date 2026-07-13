@@ -378,10 +378,64 @@ assert.equal(
 )
 console.log('(15) csat_positive_pct 검증 OK', JSON.stringify({ csatPositivePct: csatKpis.csatPositivePct }))
 
+// ── 16. resolution_compliance가 first_resolved_at(팀 종료) 기준이어야 함 ──
+// 배경: first_resolved_at은 검수대기 진입 시점(팀이 작업을 끝낸 시점)=해결-SLA 기준,
+// final_resolved_at은 최종 완료 시점(요청자가 승인한 시점)=리드타임 기준이다.
+// 팀이 SLA 안에 끝냈어도(first_resolved_at <= resolution_due_at) 요청자가 검수를
+// 늦게 하면(final_resolved_at > resolution_due_at), 옛 코드(final_resolved_at 기준)는
+// 이를 SLA 위반으로 잘못 집계했다. 다른 창과 겹치지 않는 별도의 고정 과거 날짜를 써서
+// 이 건 하나만 분모/분자에 들어가도록 격리한 뒤 정확히 1.0(준수)이어야 함을 단언한다.
+const slaBasisTitlePrefix = '대시보드테스트-SLA기준'
+const slaBasisWindowFrom = '2021-06-19' // dispute(06-15)·csat(06-17) 창과 겹치지 않는 날짜
+const slaBasisWindowTo = '2021-06-19'
+const slaBasisAnchor = new Date('2021-06-19T12:00:00Z')
+
+const slaBasisAnchorPre = await db.execute<{ cnt: string }>(sql`
+  select count(*)::text as cnt from requests
+  where status = '완료' and resolution_due_at is not null
+    and created_at >= ${slaBasisWindowFrom}::timestamptz
+    and created_at < (${slaBasisWindowTo}::date + interval '1 day')
+`)
+assert.equal(
+  slaBasisAnchorPre.rows[0].cnt, '0',
+  `앵커 날짜(${slaBasisWindowFrom})에 기존 완료+기한 데이터가 없어야 결정적 테스트가 성립한다, got ${slaBasisAnchorPre.rows[0].cnt}`,
+)
+
+const slaBasisReqId = await makeCompletedRequest(`${slaBasisTitlePrefix}-온타임해결지연검수`, slaBasisAnchor)
+// 팀은 기한 안에 끝냈다(first_resolved_at 13:00 <= resolution_due_at 14:00),
+// 요청자는 늦게 검수했다(final_resolved_at 20:00 > resolution_due_at 14:00).
+await db.execute(sql`
+  update requests set
+    first_resolved_at = '2021-06-19T13:00:00Z'::timestamptz,
+    resolution_due_at = '2021-06-19T14:00:00Z'::timestamptz,
+    final_resolved_at = '2021-06-19T20:00:00Z'::timestamptz
+  where id = ${slaBasisReqId}
+`)
+
+const slaBasisFiltered = await app.inject({
+  method: 'GET',
+  url: `/api/dashboard/metrics?from=${slaBasisWindowFrom}&to=${slaBasisWindowTo}`,
+  cookies: { sid: sysSid },
+})
+assert.equal(
+  slaBasisFiltered.statusCode, 200,
+  `SLA 기준 기간 필터 200 기대, got ${slaBasisFiltered.statusCode}: ${slaBasisFiltered.body}`,
+)
+const slaBasisKpis = slaBasisFiltered.json()
+assert.equal(
+  slaBasisKpis.sla.resolutionCompliancePct, 1,
+  `팀이 기한 안에 끝냈으면(요청자 검수가 늦어도) resolutionCompliancePct = 1.0(준수) 기대, ` +
+  `got ${slaBasisKpis.sla.resolutionCompliancePct} — final_resolved_at 기준으로 회귀했다면 0이 나온다`,
+)
+console.log('(16) resolution_compliance가 first_resolved_at 기준 OK', JSON.stringify({
+  resolutionCompliancePct: slaBasisKpis.sla.resolutionCompliancePct,
+}))
+
 // ── 정리 ──
 await db.delete(requestDisputes).where(inArray(requestDisputes.id, disputeIds))
 await db.delete(requests).where(inArray(requests.id, disputeReqIds))
 await db.delete(requests).where(inArray(requests.id, csatReqIds))
+await db.delete(requests).where(eq(requests.id, slaBasisReqId))
 await db.delete(requests).where(inArray(requests.id, fixIds))
 await db.delete(sessions).where(eq(sessions.id, staffToken))
 await db.delete(users).where(eq(users.id, staffUser.id))

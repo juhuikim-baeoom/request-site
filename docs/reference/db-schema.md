@@ -86,7 +86,7 @@ source_of_truth: server/src/db/schema.ts, server/drizzle/0001_triggers.sql
 - `sla_response_breached`, `sla_resolution_breached` boolean default false
 - `completed_at` timestamptz — 최종 완료일 (트리거 관리, `final_resolved_at`과 동일 시점)
 - `inspection_due_at` timestamptz nullable — 검수대기 진입 시각 + 7일. 자동완료 배치 조회 조건. `완료`/`진행중` 재전이 시 `null`로 리셋
-- `inspection_reminder_sent_at` timestamptz nullable — 검수대기 3일 경과 리마인더 발송 여부(건당 1회) 기록
+- `inspection_reminder_sent_at` timestamptz nullable — 검수대기 3일 경과 리마인더 발송 여부(건당 1회) 기록. 검수대기 재진입(재작업 후 재검수) 시 `null`로 재무장되어 라운드마다 리마인더가 다시 나갈 수 있다(`0009_rearm_inspection_reminder.sql`)
 
 ### 3-5. 후처리
 - `csat_rating` smallint nullable — 1~5점 척도(4점 이상=긍정), 요청자가 검수대기를 확인(`REQUESTER` 완료)하는 순간에만 저장. **구 thumbs(-1/1) 모델은 폐기**됐고 이를 쓰던 `POST /api/requests/:id/csat` 엔드포인트는 제거됨(현재 유일한 기록 경로는 `PATCH /api/requests/:id`의 검수 승인 분기)
@@ -135,7 +135,7 @@ stateDiagram-v2
 
 상태 변경 시 트리거(`on_status_change`)가 자동으로:
 - `request_status_history`에 이력 기록 (changed_by = `app.user_id` 세션 변수)
-- `검수대기` 진입 시: `first_resolved_at`(최초 1회만 세팅 — 팀이 손을 뗀 시점)·`inspection_due_at`(now+7일) 세팅, `resolution_due_at` 초과 시 `sla_resolution_breached=true`
+- `검수대기` 진입 시: `first_resolved_at`(최초 1회만 세팅 — 팀이 손을 뗀 시점)·`inspection_due_at`(now+7일) 세팅, `inspection_reminder_sent_at`을 `null`로 재무장(재검수 라운드마다 3일차 리마인더가 다시 나가도록), `resolution_due_at` 초과 시 `sla_resolution_breached=true`
 - `완료` 진입 시: `completed_at`·`final_resolved_at`(매번 갱신)·`first_resolved_at`(미세팅 시 보정) 세팅, `inspection_due_at` 해제
 - `검수대기 → 진행중`(검수 반려) 또는 `완료 → 진행중`(이의제기 수락) 되돌림 시: `completed_at`·`final_resolved_at`·`inspection_due_at`·`completion_route` 해제 + `rework_count +1` + `sla_resolution_breached` 리셋
 - 완료 경로는 `completion_route`(`REQUESTER`/`AUTO`/`SYSTEM_FORCED`)로 구분 기록되며, `SYSTEM_FORCED`는 `completion_note`에 사유가 남는다

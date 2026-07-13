@@ -210,8 +210,8 @@ export async function dashboardRoutes(app: FastifyInstance) {
               count(*) filter (
                 where r.status = '완료'
                   and r.resolution_due_at is not null
-                  and r.final_resolved_at is not null
-                  and r.final_resolved_at <= r.resolution_due_at
+                  and r.first_resolved_at is not null
+                  and r.first_resolved_at <= r.resolution_due_at
               )::numeric /
               count(*) filter (
                 where r.status = '완료' and r.resolution_due_at is not null

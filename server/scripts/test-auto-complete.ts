@@ -140,6 +140,53 @@ async function cleanup(reqId: number) {
   await cleanup(req.id)
 }
 
+// ──────────────────────────────────────────
+// (4) 재작업 후 재검수 라운드에서 리마인더가 재무장된다
+//     검수대기(리마인더 발송) → 반려/재작업 → 진행중 → 검수대기(재진입) 순으로
+//     다시 검수대기에 들어가면, inspection_reminder_sent_at이 NULL로 재무장되어
+//     두 번째 검수 라운드에서도 3일차 리마인더가 다시 나가야 한다.
+// ──────────────────────────────────────────
+{
+  const req = await makeInspecting() // 1차 검수대기 진입
+  await db.execute(sql`
+    update requests set inspection_due_at = now() + interval '3 days' where id = ${req.id}`)
+
+  const first = await runAutoComplete()
+  assert.ok(first.reminded >= 1, `1차 검수 리마인더가 나가야 함 (실제 ${first.reminded})`)
+
+  const sentAfterFirst = await db.execute<any>(sql`
+    select inspection_reminder_sent_at from requests where id = ${req.id}`)
+  assert.ok(sentAfterFirst.rows[0].inspection_reminder_sent_at !== null, '1차 검수 리마인더 발송 시각 기록됨')
+
+  // 재작업: 검수대기 → 진행중 (반려) → 검수대기 (재진입, 2차 검수 라운드)
+  await changeStatus({ reqId: req.id, to: '진행중', actorId, reason: '재작업 필요' })
+  await changeStatus({ reqId: req.id, to: '검수대기', actorId })
+
+  const rearmed = await db.execute<any>(sql`
+    select inspection_reminder_sent_at from requests where id = ${req.id}`)
+  assert.equal(
+    rearmed.rows[0].inspection_reminder_sent_at, null,
+    `재검수 진입 시 inspection_reminder_sent_at이 NULL로 재무장돼야 함, got ${rearmed.rows[0].inspection_reminder_sent_at}`,
+  )
+
+  // 2차 검수 라운드도 3일차를 지나게 만들고, 배치가 다시 리마인더를 보내는지 확인한다.
+  // 재무장이 안 됐다면(옛 버그) sent_at이 NULL이 아니므로 "IS NULL" 조건에 걸려 reminded=0이었을 것이다.
+  await db.execute(sql`
+    update requests set inspection_due_at = now() + interval '3 days' where id = ${req.id}`)
+  const second = await runAutoComplete()
+  assert.ok(
+    second.reminded >= 1,
+    `재검수 라운드에서도 리마인더가 다시 나가야 함 (실제 ${second.reminded}) — 재무장이 안 됐다면 0일 것`,
+  )
+
+  const sentAfterSecond = await db.execute<any>(sql`
+    select inspection_reminder_sent_at from requests where id = ${req.id}`)
+  assert.ok(sentAfterSecond.rows[0].inspection_reminder_sent_at !== null, '2차 검수 리마인더 발송 시각 기록됨')
+
+  console.log('(4) 재작업 후 리마인더 재무장 OK')
+  await cleanup(req.id)
+}
+
 await app.close()
 await pool.end()
 console.log('\ntest:auto-complete ALL PASSED')

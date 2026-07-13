@@ -64,6 +64,13 @@
       "when": 1784000000003,
       "tag": "0008_inspection_reminder",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1784000000004,
+      "tag": "0009_rearm_inspection_reminder",
+      "breakpoints": true
     }
   ]
 }

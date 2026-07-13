@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### Fixed
+- **대시보드 해결-SLA 준수율이 `final_resolved_at`(요청자 검수) 기준이던 것을 `first_resolved_at`(팀 종료) 기준으로 정정** (`server/src/routes/dashboard.ts`): 팀이 기한 안에 검수대기로 넘겼어도 요청자가 늦게 검수하면 SLA 위반으로 잘못 집계되던 문제. 리드타임 지표(`final_resolved_at` 기반)는 변경 없음.
+- **재작업 후 재검수 라운드에서 3일차 리마인더가 재발송되지 않던 문제 수정** (`server/drizzle/0009_rearm_inspection_reminder.sql`): `on_status_change` 트리거가 검수대기 진입 시 `inspection_reminder_sent_at`을 재설정하지 않아, 1차 검수 리마인더 발송 후 반려→재작업→재검수로 돌아가도 2차 검수에서는 리마인더가 다시 나가지 않았다. 검수대기 진입 시 `inspection_reminder_sent_at := null`로 재무장하도록 수정.
+
 ### Added
 - **검수대기 단계와 완료 후 이의제기** (`server/drizzle/0005_add_inspection_enums.sql` ~ `0008_inspection_reminder.sql`, `server/src/services/transition.ts`, `server/src/routes/disputes.ts`, `server/src/jobs/auto-complete.ts`, `src/features/requests/RequestDetail.tsx`)
   - `request_status` enum에 `검수대기` 추가(`진행중`과 `보류` 사이). 작업 종료 시 요청자 검수를 거쳐야 완료에 도달한다.
