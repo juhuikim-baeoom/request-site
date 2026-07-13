@@ -20,7 +20,7 @@ import { randomBytes } from 'node:crypto'
 import { buildApp } from '../src/app.js'
 import { db, pool } from '../src/db/client.js'
 import { users, sessions, requests } from '../src/db/schema.js'
-import { inArray, sql } from 'drizzle-orm'
+import { eq, inArray, sql } from 'drizzle-orm'
 
 const app = await buildApp()
 
@@ -95,14 +95,116 @@ try {
     assert.equal(r3.statusCode, 403, `exec는 계정 관리 불가, got ${r3.statusCode}`)
 
     // positive control: system_admin은 실제로 가능해야 한다(항상-403 오탐 방지).
-    // role 필드는 피하고 dept로 검증한다 — routes/users.ts의 ROLES 화이트리스트가
-    // ['staff','system','viewer']로 신규 역할(dept_monitor 등)을 아직 반영하지 않아
-    // role 값에 따라 의도치 않게 400이 날 수 있다(아래 보고서의 concern 참조).
     const r4 = await call(systemAdmin.sid, 'PATCH', `/api/users/${targetStaff.id}`, { dept: '변경됨' })
     assert.equal(r4.statusCode, 200, `system_admin은 계정 관리 가능해야 함, got ${r4.statusCode}: ${r4.body}`)
     assert.equal(r4.json().dept, '변경됨', 'dept 변경 반영 확인')
 
     console.log('(1) 계정·역할 관리 경계 OK — 담당자(system) 차단(핵심 회귀)·viewer 차단·exec 차단, system_admin 허용')
+  }
+
+  // ──────────────────────────────────────────
+  // (1b) routes/users.ts의 ROLES 화이트리스트 — 신규 4역할을 실제로 부여할 수 있어야 한다.
+  //      이전에는 ['staff','system','viewer']만 허용해 새 역할 부여가 전부 400
+  //      'invalid role'로 막혀 6역할 모델이 사실상 무용지물이었다(핵심 회귀 지점).
+  // ──────────────────────────────────────────
+  {
+    for (const role of ['dept_monitor', 'org_monitor', 'exec', 'system_admin'] as const) {
+      const r = await call(systemAdmin.sid, 'PATCH', `/api/users/${targetStaff.id}`, { role })
+      assert.equal(r.statusCode, 200, `system_admin은 ${role} 부여 가능해야 함, got ${r.statusCode}: ${r.body}`)
+      assert.equal(r.json().role, role, `역할이 ${role}로 반영되어야 함`)
+    }
+    // 되돌리기 — 이후 블록에서 targetStaff를 staff로 다시 쓰는 가정이 있으면 깨지므로 원복
+    const rReset = await call(systemAdmin.sid, 'PATCH', `/api/users/${targetStaff.id}`, { role: 'staff' })
+    assert.equal(rReset.statusCode, 200, `원복 PATCH 200, got ${rReset.statusCode}: ${rReset.body}`)
+
+    // 폐기값 viewer는 여전히 신규 부여 금지 → 400
+    const rViewer = await call(systemAdmin.sid, 'PATCH', `/api/users/${targetStaff.id}`, { role: 'viewer' })
+    assert.equal(rViewer.statusCode, 400, `viewer는 신규 부여 금지 → 400, got ${rViewer.statusCode}`)
+
+    console.log('(1b) 신규 역할 화이트리스트 OK — dept_monitor·org_monitor·exec·system_admin 부여 가능, viewer 신규 부여는 400')
+  }
+
+  // ──────────────────────────────────────────
+  // (1c) 마지막 system_admin 자기/타인 강등 방지 가드 (동시성 포함)
+  //      개발 DB에는 backfill-roles.ts가 최초 1회 승격한 실제 관리자(김주희)가 이미
+  //      system_admin으로 존재할 수 있어 "관리자 1명"이라는 전제가 그냥은 성립하지 않는다.
+  //      이 블록 동안만 systemAdmin 이외의 기존 관리자를 API가 아닌 DB 직접 갱신으로
+  //      잠시 비관리자로 내려 시나리오를 통제하고, 블록이 끝나면(단언 실패로 인한 중도
+  //      이탈 포함) try/finally로 반드시 원복한다 — 그래야 테스트 실패가 개발 DB의 실제
+  //      관리자 권한을 영구히 망가뜨리지 않는다.
+  // ──────────────────────────────────────────
+  {
+    const preExisting = await db.execute<{ id: string }>(
+      sql`select id from users where role = 'system_admin' and id <> ${systemAdmin.id}`,
+    )
+    const otherAdminIds = preExisting.rows.map((r) => r.id)
+    if (otherAdminIds.length) {
+      await db.update(users).set({ role: 'staff' }).where(inArray(users.id, otherAdminIds))
+    }
+
+    try {
+      // 이 시점에 system_admin은 systemAdmin 단 1명. 유일한 관리자를 강등하려 하면 거부되어야 한다.
+      const rSelfDemote = await call(systemAdmin.sid, 'PATCH', `/api/users/${systemAdmin.id}`, { role: 'staff' })
+      assert.equal(rSelfDemote.statusCode, 400, `마지막 관리자 자기 강등은 400, got ${rSelfDemote.statusCode}: ${rSelfDemote.body}`)
+      assert.equal(rSelfDemote.json().code, 'LAST_ADMIN', '오류 코드 LAST_ADMIN 확인')
+
+      // 관리자가 2명이면 한 명은 강등 가능해야 한다.
+      const secondAdmin = await makeUser('system_admin', 'sysadmin2')
+      const rDemoteOk = await call(systemAdmin.sid, 'PATCH', `/api/users/${secondAdmin.id}`, { role: 'staff' })
+      assert.equal(rDemoteOk.statusCode, 200, `관리자 2명 중 1명 강등은 허용되어야 함, got ${rDemoteOk.statusCode}: ${rDemoteOk.body}`)
+      assert.equal(rDemoteOk.json().role, 'staff', '강등 반영 확인')
+
+      // 다시 관리자가 1명(systemAdmin)뿐인 상태로 복귀했으니 재차 강등 시도는 거부되어야 한다.
+      const rSelfDemoteAgain = await call(systemAdmin.sid, 'PATCH', `/api/users/${systemAdmin.id}`, { role: 'system' })
+      assert.equal(rSelfDemoteAgain.statusCode, 400, `마지막 관리자 강등(재시도)도 400, got ${rSelfDemoteAgain.statusCode}`)
+
+      // 동시성: 관리자가 정확히 2명일 때 서로를 동시에 강등하려는 레이스 — 하나만 성공하고
+      // 최소 1명은 system_admin으로 남아야 한다(둘 다 성공하면 관리자 0명 = 버그).
+      // 공유 픽스처 systemAdmin은 이후 블록((4) 대시보드 등)이 system_admin 역할을 계속
+      // 전제하므로 레이스에 끌어들이지 않는다 — 대신 레이스 전용 관리자 2명만 새로 만들고,
+      // "이 두 명이 전체에서 유일한 system_admin"이 되도록 systemAdmin을 잠시 내렸다가
+      // 레이스 검증 직후(단언 실패 포함) 반드시 원복한다.
+      await db.update(users).set({ role: 'staff' }).where(eq(users.id, systemAdmin.id))
+      try {
+        const raceAdminX = await makeUser('system_admin', 'racex')
+        const raceAdminY = await makeUser('system_admin', 'racey')
+        const [raceA, raceB] = await Promise.all([
+          call(raceAdminX.sid, 'PATCH', `/api/users/${raceAdminY.id}`, { role: 'staff' }),
+          call(raceAdminY.sid, 'PATCH', `/api/users/${raceAdminX.id}`, { role: 'staff' }),
+        ])
+        // 거부되는 쪽이 400(트랜잭션 내부 LAST_ADMIN 가드)인지 403(자신도 상대 요청에
+        // 의해 이미 강등되어 canManageAccounts 자체가 재검사에서 실패)인지는 두 요청의
+        // 실제 I/O 인터리빙 순서에 따라 달라진다 — authenticate()의 역할 조회는 FOR
+        // UPDATE로 잠그지 않으므로, 한쪽 트랜잭션이 완전히 커밋된 뒤에야 다른 쪽이
+        // authenticate 단계에 도달하면 자기 자신이 이미 강등된 상태로 재검사되어 403이
+        // 될 수 있다. 어느 경로든 "관리자 0명" 이라는 안전하지 않은 결과는 만들지
+        // 않는다는 것이 핵심이므로, 정확히 하나만 성공(200)하고 나머지는 거부(400/403)임을
+        // 확인한 뒤 최종 진실은 DB 직접 조회로 검증한다.
+        const codes = [raceA.statusCode, raceB.statusCode]
+        const successCount = codes.filter((c) => c === 200).length
+        assert.equal(
+          successCount, 1,
+          `동시 상호 강등은 정확히 하나만 성공해야 함, got ${JSON.stringify(codes)}: ${raceA.body} / ${raceB.body}`,
+        )
+        assert.ok(
+          codes.every((c) => c === 200 || c === 400 || c === 403),
+          `실패한 요청은 400(LAST_ADMIN) 또는 403(권한 재검사 실패)이어야 함, got ${JSON.stringify(codes)}`,
+        )
+        const remainingAdmins = await db.execute<{ count: string }>(
+          sql`select count(*)::text as count from users where role = 'system_admin' and id in (${raceAdminX.id}, ${raceAdminY.id})`,
+        )
+        assert.equal(remainingAdmins.rows[0]?.count, '1', '레이스 이후에도 이 둘 중 system_admin이 정확히 1명 남아야 함')
+      } finally {
+        // 원복 — 이후 블록들이 systemAdmin=system_admin을 전제한다.
+        await db.update(users).set({ role: 'system_admin' }).where(eq(users.id, systemAdmin.id))
+      }
+
+      console.log('(1c) 마지막 관리자 강등 방지 가드 OK — 단독 관리자 자기강등 거부, 2명 중 1명 강등 허용, 동시 상호강등 레이스는 한쪽만 성공')
+    } finally {
+      if (otherAdminIds.length) {
+        await db.update(users).set({ role: 'system_admin' }).where(inArray(users.id, otherAdminIds))
+      }
+    }
   }
 
   // ──────────────────────────────────────────

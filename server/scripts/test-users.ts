@@ -74,11 +74,11 @@ const staffCookies = { sid: staffSid }
     method: 'PATCH',
     url: `/api/users/${staffUser.id}`,
     cookies: sysCookies,
-    payload: { role: 'viewer', dept: '테스트팀', org_affil: '배론', dept_function: '운영팀' },
+    payload: { role: 'dept_monitor', dept: '테스트팀', org_affil: '배론', dept_function: '운영팀' },
   })
   assert.equal(res.statusCode, 200, `PATCH 200, got ${res.statusCode}: ${res.body}`)
   const updated = res.json()
-  assert.equal(updated.role, 'viewer', 'role 변경 확인')
+  assert.equal(updated.role, 'dept_monitor', 'role 변경 확인')
   assert.equal(updated.dept, '테스트팀', 'dept 변경 확인')
   assert.equal(updated.org_affil, '배론', 'org_affil 변경 확인')
   assert.equal(updated.dept_function, '운영팀', 'dept_function 변경 확인')
@@ -158,7 +158,7 @@ await db.execute(sql`delete from org_directory where email in (${importEmail1}, 
     cookies: sysCookies,
     payload: {
       rows: [
-        { email: importEmail1, name: '임포트1수정', dept: '기획팀수정', org_affil: '배론', role: 'viewer' },
+        { email: importEmail1, name: '임포트1수정', dept: '기획팀수정', org_affil: '배론', role: 'org_monitor' },
       ],
     },
   })
@@ -172,7 +172,7 @@ await db.execute(sql`delete from org_directory where email in (${importEmail1}, 
   `)
   assert.equal(rows.rows[0]?.name, '임포트1수정', '이름 업데이트 확인')
   assert.equal(rows.rows[0]?.org_affil, '배론', 'org_affil 업데이트 확인')
-  assert.equal(rows.rows[0]?.role, 'viewer', 'role 업데이트 확인')
+  assert.equal(rows.rows[0]?.role, 'org_monitor', 'role 업데이트 확인')
   console.log('(7) org-directory import upsert 업데이트 OK')
 }
 

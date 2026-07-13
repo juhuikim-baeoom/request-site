@@ -5,7 +5,19 @@ import { authenticate } from '../auth/session.js'
 import { canProcess, canManageAccounts } from '../authz.js'
 import { isOneOf, ORGS } from '../http.js'
 
-const ROLES = ['staff', 'system', 'viewer'] as const
+// 신규 부여 가능한 6역할. 폐기값 'viewer'는 제외 — 기존 행에 남은 값은 유지하되
+// PATCH/조직도 import를 통한 신규 부여는 막는다(canManageAccounts와 별개의 값 검증).
+const ROLES = ['staff', 'dept_monitor', 'org_monitor', 'system', 'exec', 'system_admin'] as const
+
+/** PATCH /api/users/:id 트랜잭션 내부에서 던지는 타입 오류 — routes/requests.ts의
+ * AssignError/TransitionError와 동일한 (message, code) 관례를 따른다. */
+class UserPatchError extends Error {
+  code: string
+  constructor(msg: string, code: string) {
+    super(msg)
+    this.code = code
+  }
+}
 
 export async function userRoutes(app: FastifyInstance) {
   app.addHook('preHandler', authenticate)
@@ -69,56 +81,94 @@ export async function userRoutes(app: FastifyInstance) {
         return { error: 'invalid org_affil' }
       }
 
-      // 대상 사용자 존재 확인
-      const existing = await db.execute<{ id: string }>(sql`
-        select id from users where id = ${id}::uuid limit 1
-      `)
-      if (existing.rows.length === 0) {
-        reply.code(404)
-        return { error: 'user not found' }
-      }
+      try {
+        const updatedRow = await withUser(u.id, async (tx) => {
+          // 대상 사용자 행 + (role 변경 시) 현재 system_admin 전원을 id 오름차순으로 같은
+          // 트랜잭션에서 FOR UPDATE 잠근다. 잠금 순서가 항상 id 오름차순으로 고정되므로
+          // 두 관리자가 동시에 서로를 강등해도 데드락 없이 순차 처리되고, 마지막
+          // system_admin이 사라지는 갱신은 원자적으로 막을 수 있다(TOCTOU 방지,
+          // services/assign.ts·transition.ts와 동일 관례).
+          const lockRows = 'role' in b
+            ? await tx.execute<{ id: string; role: string }>(sql`
+                select id, role from users
+                where id = ${id}::uuid or role = 'system_admin'
+                order by id
+                for update
+              `)
+            : await tx.execute<{ id: string; role: string }>(sql`
+                select id, role from users where id = ${id}::uuid for update
+              `)
 
-      // SET 절 동적 조립
-      const setClauses: any[] = []
-      if ('role' in b) {
-        setClauses.push(sql`role = ${b.role}::user_role`)
-      }
-      if ('dept' in b) {
-        setClauses.push(sql`dept = ${b.dept}`)
-      }
-      if ('org_affil' in b) {
-        if (b.org_affil === null) {
-          setClauses.push(sql`org_affil = null`)
-        } else {
-          setClauses.push(sql`org_affil = ${b.org_affil}::request_org`)
+          const target = lockRows.rows.find((r) => r.id === id)
+          if (!target) {
+            throw new UserPatchError('user not found', 'NOT_FOUND')
+          }
+
+          if ('role' in b && target.role === 'system_admin' && b.role !== 'system_admin') {
+            const adminCount = lockRows.rows.filter((r) => r.role === 'system_admin').length
+            if (adminCount <= 1) {
+              throw new UserPatchError(
+                '마지막 시스템팀 관리자는 다른 역할로 변경할 수 없습니다',
+                'LAST_ADMIN',
+              )
+            }
+          }
+
+          // SET 절 동적 조립
+          const setClauses: any[] = []
+          if ('role' in b) {
+            setClauses.push(sql`role = ${b.role}::user_role`)
+          }
+          if ('dept' in b) {
+            setClauses.push(sql`dept = ${b.dept}`)
+          }
+          if ('org_affil' in b) {
+            if (b.org_affil === null) {
+              setClauses.push(sql`org_affil = null`)
+            } else {
+              setClauses.push(sql`org_affil = ${b.org_affil}::request_org`)
+            }
+          }
+          if ('dept_function' in b) {
+            setClauses.push(sql`dept_function = ${b.dept_function}`)
+          }
+
+          // SET 절 합치기
+          let setExpr = setClauses[0]
+          for (let i = 1; i < setClauses.length; i++) {
+            setExpr = sql`${setExpr}, ${setClauses[i]}`
+          }
+
+          const updated = await tx.execute<{
+            id: string
+            email: string
+            name: string | null
+            dept: string | null
+            org_affil: string | null
+            dept_function: string | null
+            role: string
+          }>(sql`
+            update users
+            set ${setExpr}
+            where id = ${id}::uuid
+            returning id, email, name, dept, org_affil, dept_function, role
+          `)
+
+          return updated.rows[0]
+        })
+
+        return updatedRow
+      } catch (e: any) {
+        if (e instanceof UserPatchError) {
+          if (e.code === 'NOT_FOUND') {
+            reply.code(404)
+            return { error: 'user not found' }
+          }
+          reply.code(400)
+          return { error: e.message, code: e.code }
         }
+        throw e
       }
-      if ('dept_function' in b) {
-        setClauses.push(sql`dept_function = ${b.dept_function}`)
-      }
-
-      // SET 절 합치기
-      let setExpr = setClauses[0]
-      for (let i = 1; i < setClauses.length; i++) {
-        setExpr = sql`${setExpr}, ${setClauses[i]}`
-      }
-
-      const updated = await db.execute<{
-        id: string
-        email: string
-        name: string | null
-        dept: string | null
-        org_affil: string | null
-        dept_function: string | null
-        role: string
-      }>(sql`
-        update users
-        set ${setExpr}
-        where id = ${id}::uuid
-        returning id, email, name, dept, org_affil, dept_function, role
-      `)
-
-      return updated.rows[0]
     },
   )
 
