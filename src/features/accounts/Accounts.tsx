@@ -32,10 +32,15 @@ function UserRow({
 
   function handleSave() {
     const patch: UpdateUserInput = {
-      role: draft.role,
       dept: draft.dept ?? null,
       org_affil: draft.org_affil ?? null,
       dept_function: draft.dept_function ?? null,
+    }
+    // role은 실제로 바뀐 경우에만 담는다. 폐기값(viewer)은 ASSIGNABLE_ROLES에
+    // 없어 select가 그 값을 옵션으로 제공하지 않으므로, 관리자가 역할을 건드리지
+    // 않고 부서·소속기관만 고치려 할 때 항상 role을 보내면 서버가 400을 반환한다.
+    if (draft.role !== user.role) {
+      patch.role = draft.role
     }
     updateUser.mutate(patch, {
       onSuccess: () => {
@@ -137,6 +142,14 @@ function UserRow({
           className="w-full rounded border border-gray-300 px-2 py-1 text-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand"
           aria-label="역할"
         >
+          {/* 폐기값(viewer) 등 신규 부여 불가 역할이 현재 값이면, select가 실제 값을
+              표시할 수 있도록 비활성 옵션으로 임시 추가한다. 관리자가 목록에서 정상
+              역할을 골라 저장하면 이 옵션은 사라지고 구제(role 변경)가 완료된다. */}
+          {!(ASSIGNABLE_ROLES as readonly string[]).includes(draft.role ?? '') && draft.role && (
+            <option value={draft.role} disabled>
+              {ROLE_LABEL[draft.role] ?? draft.role} (폐기값 — 아래에서 새 역할 선택 필요)
+            </option>
+          )}
           {ASSIGNABLE_ROLES.map((r) => (
             <option key={r} value={r}>
               {ROLE_LABEL[r]}

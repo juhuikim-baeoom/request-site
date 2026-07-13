@@ -99,7 +99,11 @@ export async function userRoutes(app: FastifyInstance) {
                 select id, role from users where id = ${id}::uuid for update
               `)
 
-          const target = lockRows.rows.find((r) => r.id === id)
+          // Postgres는 uuid 대소문자를 구분하지 않고 소문자 정규형으로 반환하지만,
+          // `id`는 URL 원문(대문자일 수 있음)이므로 문자열 비교 전 대소문자를 맞춘다.
+          // 그렇지 않으면 대문자 UUID로 PATCH할 때 행이 잠겼는데도 못 찾아 404가 난다.
+          const targetIdLower = id.toLowerCase()
+          const target = lockRows.rows.find((r) => r.id.toLowerCase() === targetIdLower)
           if (!target) {
             throw new UserPatchError('user not found', 'NOT_FOUND')
           }
