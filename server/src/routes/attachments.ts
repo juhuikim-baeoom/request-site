@@ -44,6 +44,17 @@ export async function attachmentRoutes(app: FastifyInstance) {
       if (!isNaN(parsed) && parsed > 0) commentId = parsed
     }
 
+    // comment_id 소속 검증 — 클라이언트가 보낸 comment_id가 실제로 이 요청(id)의 댓글인지 확인.
+    // 검증 없이 그대로 저장하면 A요청에 파일을 올리면서 B요청의 댓글 id를 붙일 수 있다(무결성 문제;
+    // 정보 유출은 아님 — 첨부 조회는 request_id로 필터되므로 남의 스레드에 노출되지 않고, 엉뚱한
+    // id를 붙이면 오히려 업로더 자신에게도 안 보이게 될 뿐이다). 이 파일의 기존 관례(존재 여부를
+    // 노출하지 않기 위해 거부·부재를 404로 통일)에 맞춘다.
+    if (commentId !== null) {
+      const c = await db.execute<any>(sql`
+        select id from request_comments where id = ${commentId} and request_id = ${id}`)
+      if (!c.rows[0]) { reply.code(404).send({ error: 'not found' }); return }
+    }
+
     const { path, size } = await saveUpload(id, part.filename, buf)
     const r = await db.execute<any>(sql`
       insert into request_attachments (request_id, storage_path, file_name, file_size, mime_type, uploaded_by, comment_id)

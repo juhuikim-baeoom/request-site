@@ -179,6 +179,77 @@ try {
   )
   console.log('plain (comment_id=null) attachment still visible after fail-closed fix ok')
 
+  // ──────────────────────────────────────────
+  // comment_id 소속 검증 회귀 테스트 — 업로드 시 클라이언트가 보낸 comment_id가
+  // 실제로 같은 요청(request_id)의 댓글인지 확인해야 한다. 검증 없이 저장하면
+  // A요청에 파일을 올리면서 B요청의 댓글 id를 붙일 수 있었다(무결성 문제).
+  // ──────────────────────────────────────────
+  const [req2] = await db.insert(requests).values({
+    org: '공통', typeCode: 'error', title: 'attach-authz-req2', requesterId: juhui!.id, visibility: 'shared',
+  }).returning()
+  requestIds.push(req2.id)
+
+  // req2에 댓글 하나 생성 — 이 댓글은 req2 소속이지 req 소속이 아니다
+  const foreignComment = await app.inject({
+    method: 'POST', url: `/api/requests/${req2.id}/comments`, cookies: { sid: sysSid },
+    payload: { body: 'req2 댓글', is_internal: false },
+  })
+  assert.equal(foreignComment.statusCode, 201)
+  const foreignCommentId = foreignComment.json().id
+
+  // req(첫 번째 요청)에 첨부를 올리면서 req2의 댓글 id를 붙이면 거부되어야 한다(404 — 존재 여부 미노출 관례)
+  const boundaryX = '----x'
+  const bodyX = Buffer.concat([
+    Buffer.from(`--${boundaryX}\r\nContent-Disposition: form-data; name="comment_id"\r\n\r\n${foreignCommentId}`),
+    Buffer.from(`\r\n--${boundaryX}\r\nContent-Disposition: form-data; name="file"; filename="cross-request.txt"\r\nContent-Type: text/plain\r\n\r\n`),
+    Buffer.from('cross-request-attempt'),
+    Buffer.from(`\r\n--${boundaryX}--\r\n`),
+  ])
+  const crossReqUpload = await app.inject({
+    method: 'POST', url: `/api/requests/${req.id}/attachments`, cookies: { sid: sysSid },
+    headers: { 'content-type': `multipart/form-data; boundary=${boundaryX}` }, payload: bodyX,
+  })
+  assert.equal(crossReqUpload.statusCode, 404, '다른 요청의 댓글 id를 붙인 업로드는 거부되어야 함')
+  console.log('cross-request comment_id upload rejected (404) ok')
+
+  // req 소속 댓글을 새로 만들어 같은 요청의 comment_id를 붙이면 정상 업로드되어야 한다
+  const ownComment = await app.inject({
+    method: 'POST', url: `/api/requests/${req.id}/comments`, cookies: { sid: sysSid },
+    payload: { body: 'req 자체 댓글', is_internal: false },
+  })
+  assert.equal(ownComment.statusCode, 201)
+  const ownCommentId = ownComment.json().id
+
+  const boundaryY = '----y'
+  const bodyY = Buffer.concat([
+    Buffer.from(`--${boundaryY}\r\nContent-Disposition: form-data; name="comment_id"\r\n\r\n${ownCommentId}`),
+    Buffer.from(`\r\n--${boundaryY}\r\nContent-Disposition: form-data; name="file"; filename="own-request.txt"\r\nContent-Type: text/plain\r\n\r\n`),
+    Buffer.from('own-request-ok'),
+    Buffer.from(`\r\n--${boundaryY}--\r\n`),
+  ])
+  const ownReqUpload = await app.inject({
+    method: 'POST', url: `/api/requests/${req.id}/attachments`, cookies: { sid: sysSid },
+    headers: { 'content-type': `multipart/form-data; boundary=${boundaryY}` }, payload: bodyY,
+  })
+  assert.equal(ownReqUpload.statusCode, 201, '같은 요청의 댓글 id를 붙인 업로드는 정상 처리되어야 함')
+  assert.equal(Number(ownReqUpload.json().comment_id), Number(ownCommentId))
+  console.log('same-request comment_id upload accepted (201) ok')
+
+  // comment_id 없는(요청 본문) 첨부도 여전히 정상 업로드되어야 한다(과잉 차단 방지)
+  const boundaryZ = '----z'
+  const bodyZ = Buffer.concat([
+    Buffer.from(`--${boundaryZ}\r\nContent-Disposition: form-data; name="file"; filename="no-comment.txt"\r\nContent-Type: text/plain\r\n\r\n`),
+    Buffer.from('no-comment-ok'),
+    Buffer.from(`\r\n--${boundaryZ}--\r\n`),
+  ])
+  const noCommentUpload = await app.inject({
+    method: 'POST', url: `/api/requests/${req.id}/attachments`, cookies: { sid: sysSid },
+    headers: { 'content-type': `multipart/form-data; boundary=${boundaryZ}` }, payload: bodyZ,
+  })
+  assert.equal(noCommentUpload.statusCode, 201, 'comment_id 없는 첨부는 여전히 정상 업로드되어야 함')
+  assert.equal(noCommentUpload.json().comment_id, null)
+  console.log('comment_id-less upload still accepted (201) ok')
+
   console.log('ATTACH AUTHZ TEST OK')
 } finally {
   // 정리 — 단언 실패에도 반드시 실행(다음 실행이 unique 위반으로 죽는 것 방지)
