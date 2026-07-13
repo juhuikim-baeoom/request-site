@@ -30,6 +30,7 @@
     "test:comment-attach": "tsx scripts/test-comment-attach.ts",
     "test:dashboard": "tsx scripts/test-dashboard.ts",
     "test:users": "tsx scripts/test-users.ts",
+    "test:roles": "tsx scripts/test-role-boundaries.ts",
     "test:notifications": "tsx scripts/test-notifications.ts"
   },
   "dependencies": {
