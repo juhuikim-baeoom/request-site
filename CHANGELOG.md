@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+### Changed
+- **화면 명칭 정리 — "내 요청" 3중 중복 제거** (`src/components/TopNav.tsx`, `src/features/requests/MyRequests.tsx`, `RequestDetail.tsx`, `RequestForm.tsx`): 메뉴 "내 요청" → 페이지 제목 "내 요청 목록" → 탭 "내 요청"으로 같은 단어가 세 겹으로 반복되고, 되돌아가기 링크만 "내 요청 목록"이라 메뉴와 어긋나던 문제를 정리했다.
+  - **메뉴·제목은 장소, 탭은 범위**로 역할을 나눴다: 메뉴/제목 "요청 목록", 탭 "나의 요청" / "전체"·"우리 기관"·"우리 부서"·"공유받은 요청"(역할별).
+  - 상세 되돌아가기 "← 요청 목록", 접수 완료 화면 "요청 목록 보기".
+  - "티켓" 도입은 채택하지 않았다 — 이 시스템의 언어가 이미 "요청"(요청자·요청 접수·접수번호)으로 통일돼 있어 두 언어가 섞이고, 티켓은 IT 헬프데스크 은어라 실제 사용자(교학·상담영업 등)에게 낯설다. 실제 문제는 단어가 아니라 계층 중복이었다.
+
 ### Added
 - **공유 설정 사후 수정** (`server/src/services/sharing.ts`, `PUT /api/requests/:id/sharing`, `GET /api/requests/:id/sharing-history`, `src/features/requests/SharingEditor.tsx`, `server/drizzle/0007_request_sharing_history.sql`): 접수 후에도 공개범위와 공유 대상(직무·세부부서)을 바꿀 수 있다. 처리 중 다른 부서·기관이 봐야 한다는 사실이 드러났을 때 대응할 수 있게 하기 위함이다.
   - 권한 `canChangeSharing`(`server/src/authz.ts`): `canProcess`(system·system_admin) 또는 요청자 본인(상태 무관, 종결 후에도). 공유는 처리 내용을 바꾸지 않고 "누가 볼 수 있는가"만 바꾸므로 본문 편집(`canProcess` 또는 요청자 본인 && `status='접수'`)보다 넓게 열었다. 서버가 DB의 `requester_id`로 판정한다.

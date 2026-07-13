@@ -11,7 +11,7 @@ import { ASSIGNABLE_ROLES } from './constants'
  */
 type Role = UserRole | null | undefined
 
-/** 로그인한 유효(비폐기) 역할 전부 — 요청 접수·내 요청처럼 전 역할에 노출하는 메뉴/라우트에 사용 */
+/** 로그인한 유효(비폐기) 역할 전부 — 요청 접수·요청 목록처럼 전 역할에 노출하는 메뉴/라우트에 사용 */
 export function canAccessApp(role: Role): boolean {
   return !!role && (ASSIGNABLE_ROLES as readonly string[]).includes(role)
 }

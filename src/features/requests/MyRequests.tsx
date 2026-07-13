@@ -151,14 +151,15 @@ export function MyRequests() {
     return list
   }, [rows, profile?.id, tab, status, typeCode, org, sort, showClosed])
 
-  // 두 번째 탭의 의미는 역할에 따라 달라진다 — 서버 visibilityFilter가 범위를 정한다.
+  // 탭은 '장소'가 아니라 '범위'를 가리킨다 — 페이지 제목(요청 목록)과 단어가 겹치지 않게 한다.
+  // 두 번째 탭의 범위는 역할에 따라 달라진다 — 서버 visibilityFilter가 실제 범위를 정한다.
   const othersLabel = canSeeAllRequests(profile?.role)
-    ? '전체 요청'
+    ? '전체'
     : profile?.role === 'org_monitor'
-      ? '우리 기관 요청'
+      ? '우리 기관'
       : profile?.role === 'dept_monitor'
-        ? '우리 부서 요청'
-        : '부서·공유 요청'
+        ? '우리 부서'
+        : '공유받은 요청'
 
   function tabBtn(t: Tab, label: string) {
     const active = tab === t
@@ -177,12 +178,12 @@ export function MyRequests() {
   }
 
   return (
-    <section aria-label="내 요청 목록">
-      <h1 className="text-xl font-bold text-gray-900">내 요청 목록</h1>
+    <section aria-label="요청 목록">
+      <h1 className="text-xl font-bold text-gray-900">요청 목록</h1>
 
       {/* 탭 */}
-      <div className="mt-4 flex gap-1" role="tablist" aria-label="요청 탭">
-        {tabBtn('mine', '내 요청')}
+      <div className="mt-4 flex gap-1" role="tablist" aria-label="요청 범위 탭">
+        {tabBtn('mine', '나의 요청')}
         {tabBtn('others', othersLabel)}
       </div>
 
