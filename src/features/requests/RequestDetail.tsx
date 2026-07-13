@@ -13,6 +13,7 @@ import {
   dueBadgeClass,
 } from '../../lib/constants'
 import { fmtDateTime } from '../../lib/format'
+import { canProcess, canSeeInternal } from '../../lib/permissions'
 import type { PriorityLevel, RequestStatus, RequestVisibility } from '../../types/database'
 import type { Urgency } from '../../lib/constants'
 import { AdminPanel } from './AdminPanel'
@@ -79,11 +80,13 @@ export function RequestDetail() {
   const id = Number(idParam)
 
   const { profile } = useAuth()
-  const isSystemUser = profile?.role === 'system'
+  // 처리 능력(배정·상태·영향도·필드 편집·재작업)과 내부메모 열람을 분리해서 판정한다.
+  const canProcessRequest = canProcess(profile?.role)
+  const canViewInternal = canSeeInternal(profile?.role)
 
   // 진입 경로(?from=)에 따라 되돌아갈 목록을 정한다. 알림 등 출처 없는 진입은 내 요청 목록.
   const [searchParams] = useSearchParams()
-  const backToBoard = searchParams.get('from') === 'board' && isSystemUser
+  const backToBoard = searchParams.get('from') === 'board' && canProcessRequest
   const backTo = backToBoard ? '/board' : '/requests/mine'
   const backLabel = backToBoard ? '관리 보드' : '내 요청 목록'
 
@@ -140,7 +143,7 @@ export function RequestDetail() {
     try {
       const result = await addComment.mutateAsync({
         body,
-        is_internal: isSystemUser ? isInternal : false,
+        is_internal: canViewInternal ? isInternal : false,
       })
       // 첨부 업로드 (comment_id 링크)
       for (const file of files) {
@@ -233,11 +236,11 @@ export function RequestDetail() {
   }
 
   const { view: v, requester, assignee, sharedTargets } = data
-  const canEdit = isSystemUser || (v.requester_id === profile?.id && v.status === '접수')
+  const canEdit = canProcessRequest || (v.requester_id === profile?.id && v.status === '접수')
   // 철회는 전이 매트릭스상 '접수' 상태에서만 유효 (server/src/services/transition.ts ALLOWED와 동일 기준)
   const canWithdraw = canEdit && (ALLOWED_TRANSITIONS[v.status as RequestStatus] ?? []).includes('철회')
   const isRequester = v.requester_id === profile?.id
-  const canRework = isSystemUser && v.status === '완료'
+  const canRework = canProcessRequest && v.status === '완료'
   const canCsat =
     isRequester && v.status === '완료' && (v.csat_rating == null || v.csat_rating === undefined)
   const csatSubmitted =
@@ -356,8 +359,8 @@ export function RequestDetail() {
         )}
       </div>
 
-      {/* 시스템팀 전용 관리 패널 — 담당자·상태·영향도를 상세 화면에서 바로 변경 */}
-      {isSystemUser && (
+      {/* 처리 능력 보유자 전용 관리 패널 — 담당자·상태·영향도를 상세 화면에서 바로 변경 */}
+      {canProcessRequest && (
         <AdminPanel
           requestId={id}
           status={v.status as RequestStatus}
@@ -760,8 +763,8 @@ export function RequestDetail() {
             variant="public"
             onSubmit={(body, files) => submitComment(body, files, false)}
           />
-          {/* 아래: 내부 메모 (시스템팀 전용 · 코드 입력용) */}
-          {isSystemUser && (
+          {/* 아래: 내부 메모 (내부메모 열람 능력 보유자 전용 · 코드 입력용) */}
+          {canViewInternal && (
             <CommentComposer
               variant="internal"
               onSubmit={(body, files) => submitComment(body, files, true)}

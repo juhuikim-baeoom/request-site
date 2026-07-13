@@ -12,6 +12,7 @@ import {
   dueBadgeClass,
 } from '../../lib/constants'
 import { fmtDate, fmtDateTime } from '../../lib/format'
+import { canSeeAllRequests } from '../../lib/permissions'
 import type { RequestOrg, RequestStatus, RequestVisibility } from '../../types/database'
 import { useRequestTypes, useRequestViews, useVisibleSharedTargets } from './api'
 
@@ -150,6 +151,15 @@ export function MyRequests() {
     return list
   }, [rows, profile?.id, tab, status, typeCode, org, sort, showClosed])
 
+  // 두 번째 탭의 의미는 역할에 따라 달라진다 — 서버 visibilityFilter가 범위를 정한다.
+  const othersLabel = canSeeAllRequests(profile?.role)
+    ? '전체 요청'
+    : profile?.role === 'org_monitor'
+      ? '우리 기관 요청'
+      : profile?.role === 'dept_monitor'
+        ? '우리 부서 요청'
+        : '부서·공유 요청'
+
   function tabBtn(t: Tab, label: string) {
     const active = tab === t
     return (
@@ -173,7 +183,7 @@ export function MyRequests() {
       {/* 탭 */}
       <div className="mt-4 flex gap-1" role="tablist" aria-label="요청 탭">
         {tabBtn('mine', '내 요청')}
-        {tabBtn('others', '부서·공유 요청')}
+        {tabBtn('others', othersLabel)}
       </div>
 
       {/* 필터 행 */}

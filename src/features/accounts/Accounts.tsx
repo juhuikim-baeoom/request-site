@@ -4,7 +4,7 @@ import type { UserRow, UpdateUserInput, OrgDirectoryRow } from './api'
 import type { UserRole, RequestOrg } from '../../types/database'
 import { ORG_OPTIONS, ROLE_LABEL, ASSIGNABLE_ROLES } from '../../lib/constants'
 import { useAuth } from '../../auth/useAuth'
-import { canManageAccounts } from '../../lib/permissions'
+import { canManageAccounts, canProcess } from '../../lib/permissions'
 
 const ORG_LABEL: Record<RequestOrg, string> = {
   배움: '배움',
@@ -65,9 +65,9 @@ function UserRow({
         <td className="px-3 py-2.5 text-sm">
           <span
             className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${
-              user.role === 'system' || user.role === 'system_admin'
+              canProcess(user.role)
                 ? 'bg-indigo-100 text-indigo-700'
-                : user.role === 'viewer'
+                : !(ASSIGNABLE_ROLES as readonly string[]).includes(user.role)
                   ? 'bg-amber-100 text-amber-700'
                   : 'bg-gray-100 text-gray-600'
             }`}
