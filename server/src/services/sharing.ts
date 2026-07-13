@@ -1,6 +1,6 @@
 import { sql } from 'drizzle-orm'
 import { withUser } from '../db/client.js'
-import { ORGS } from '../http.js'
+import { ORGS, FUNCTION_TARGETS } from '../http.js'
 
 export type Visibility = 'private' | 'dept' | 'function' | 'org' | 'shared'
 
@@ -35,18 +35,6 @@ function dedupeTargets(targets: SharedTarget[]): SharedTarget[] {
   }
   return out
 }
-
-// 직무 단위(target_type='function') 큐레이션 6종 — 클라이언트 src/lib/constants.ts의
-// FUNCTION_TARGETS와 동일해야 한다(서버는 클라이언트 코드를 import할 수 없어 사본을 둔다).
-// server/src/http.ts의 ORGS·VISIBILITIES와 같은 관례.
-const FUNCTION_TARGETS = [
-  '교학팀',
-  '상담영업팀',
-  '기획마케팅팀',
-  '상품개발팀',
-  '경영지원팀',
-  '시스템팀',
-] as const
 
 /** dept target_value 형식 검증: '기관|직무' — 기관은 ORGS, 직무는 FUNCTION_TARGETS 중 하나 */
 function isValidDeptTargetValue(v: string): boolean {
