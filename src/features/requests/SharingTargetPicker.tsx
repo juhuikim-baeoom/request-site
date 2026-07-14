@@ -128,7 +128,7 @@ export function SharingTargetPicker({
     if (!open) return
     const el = listRef.current?.querySelector<HTMLElement>(`#${CSS.escape(optionId(activeIndex))}`)
     el?.scrollIntoView({ block: 'nearest' })
-  }, [open, activeIndex])
+  }, [open, activeIndex, candidates])
 
   function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key === 'ArrowDown') {
