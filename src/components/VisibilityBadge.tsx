@@ -1,4 +1,4 @@
-import { VISIBILITY_SHORT, parseDeptTargetValue, deptTargetLabel } from '../lib/constants'
+import { VISIBILITY_SHORT, sharedTargetLabel } from '../lib/constants'
 import type { RequestVisibility, SharedTargetType } from '../types/database'
 
 interface SharedTargetLike {
@@ -11,16 +11,10 @@ interface VisibilityBadgeProps {
   sharedTargets?: SharedTargetLike[]
 }
 
-function sharedLabel(t: SharedTargetLike): string {
-  if (t.target_type === 'function') return `${t.target_value} 전체`
-  // dept: '배움|교학팀' → '배움_교학팀'
-  const { org, fn } = parseDeptTargetValue(t.target_value)
-  return deptTargetLabel(org, fn)
-}
-
 /**
  * 공개범위 + 추가 공유 대상을 뱃지로 표시.
- * 예: [부서만] [+교학팀 전체] [+배움_교학팀]
+ * 예: [부서만] [+교학팀 전체] [+배움 › 교학팀]
+ * 라벨 규칙은 sharedTargetLabel이 SSOT — 타임라인·선택 피커와 같은 표기를 쓴다.
  */
 export function VisibilityBadge({ visibility, sharedTargets = [] }: VisibilityBadgeProps) {
   return (
@@ -33,7 +27,7 @@ export function VisibilityBadge({ visibility, sharedTargets = [] }: VisibilityBa
           key={`${t.target_type}:${t.target_value}`}
           className="rounded bg-brand/10 px-1.5 py-0.5 text-xs font-medium text-brand"
         >
-          +{sharedLabel(t)}
+          +{sharedTargetLabel(t)}
         </span>
       ))}
     </span>

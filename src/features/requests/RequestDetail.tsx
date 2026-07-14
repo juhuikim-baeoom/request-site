@@ -10,7 +10,7 @@ import {
   PRIORITY_LEVEL_BADGE,
   URGENCY_OPTIONS,
   VISIBILITY_OPTIONS,
-  deptTargetLabel,
+  sharedTargetLabel,
   dueBadgeClass,
 } from '../../lib/constants'
 import { fmtDateTime } from '../../lib/format'
@@ -88,14 +88,9 @@ function visibilityLabel(v: string): string {
   return VISIBILITY_OPTIONS.find((o) => o.value === v)?.label ?? v
 }
 
-function targetLabel(t: { target_type: string; target_value: string }): string {
-  // dept 값은 '배움|교학팀' 형식 — deptTargetLabel이 '배움_교학팀'으로 표시한다
-  if (t.target_type === 'dept') {
-    const [org, fn] = t.target_value.split('|')
-    return deptTargetLabel(org, fn)
-  }
-  return t.target_value
-}
+// 공유대상 라벨은 sharedTargetLabel(src/lib/constants.ts)이 SSOT —
+// 뱃지·타임라인·선택 피커가 같은 표기를 쓴다.
+const targetLabel = sharedTargetLabel
 
 export function RequestDetail() {
   const { id: idParam } = useParams<{ id: string }>()

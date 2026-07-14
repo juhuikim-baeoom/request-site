@@ -217,17 +217,28 @@ export const FUNCTION_TARGETS: string[] = [
   '시스템팀',
 ]
 
-// 추가 공유 — 세부부서(target_type='dept') 값/라벨 규칙
-//   value: '배움|교학팀' (RLS 매칭용), label: '배움_교학팀' (표시용)
+// 추가 공유 — 세부부서(target_type='dept')의 전송값 규칙: '배움|교학팀' (열람 판정 매칭용)
 export function deptTargetValue(org: RequestOrg | string, fn: string): string {
   return `${org}|${fn}`
-}
-export function deptTargetLabel(org: RequestOrg | string, fn: string): string {
-  return `${org}_${fn}`
 }
 export function parseDeptTargetValue(value: string): { org: string; fn: string } {
   const [org, fn] = value.split('|')
   return { org: org ?? '', fn: fn ?? '' }
+}
+
+/**
+ * 공유대상 표시 라벨 — 뱃지·타임라인·선택 피커가 모두 이 함수를 쓴다.
+ * 규칙이 세 곳에 흩어져 있어 같은 대상이 화면마다 다르게 보이던 문제를 없앤다.
+ *   직무 단위: '교학팀 전체'
+ *   세부부서:  '배움 › 교학팀'  (전송값 '배움|교학팀')
+ * 후보 목록에 없는 값(조직도에서 빠진 팀 등)도 전송값에서 라벨을 만들어 항상 표시한다.
+ */
+export function sharedTargetLabel(t: { target_type: string; target_value: string }): string {
+  if (t.target_type === 'dept') {
+    const { org, fn } = parseDeptTargetValue(t.target_value)
+    return org && fn ? `${org} › ${fn}` : t.target_value
+  }
+  return `${t.target_value} 전체`
 }
 
 /** 담당자 select 후보 항목 (원 후보 목록 밖에서 편입된 경우 outsideCandidates=true) */

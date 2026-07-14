@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
-import { FUNCTION_TARGETS, deptTargetValue, parseDeptTargetValue } from '../../lib/constants'
+import { FUNCTION_TARGETS, deptTargetValue, sharedTargetLabel } from '../../lib/constants'
 import { useDeptOptions } from './api'
 
 export interface SharingTargetPickerProps {
@@ -45,15 +45,18 @@ export function SharingTargetPicker({
     const fns: Candidate[] = FUNCTION_TARGETS.map((fn) => ({
       kind: 'function',
       value: fn,
-      label: `${fn} 전체`,
+      label: sharedTargetLabel({ target_type: 'function', target_value: fn }),
     }))
     const depts: Candidate[] = (deptOptions ?? [])
       .filter((o) => o.dept_function) // 빈 문자열 방어 — 서버가 이미 걸러내지만 한 번 더
-      .map((o) => ({
-        kind: 'dept' as const,
-        value: deptTargetValue(o.org_affil, o.dept_function),
-        label: `${o.org_affil} › ${o.dept_function}`,
-      }))
+      .map((o) => {
+        const value = deptTargetValue(o.org_affil, o.dept_function)
+        return {
+          kind: 'dept' as const,
+          value,
+          label: sharedTargetLabel({ target_type: 'dept', target_value: value }),
+        }
+      })
     return [...fns, ...depts]
   }, [deptOptions])
 
@@ -80,17 +83,18 @@ export function SharingTargetPicker({
     const matchedValues = new Set(matched.map((c) => c.value))
     const extraFn: Candidate[] = [...fnTargets]
       .filter((v) => !matchedValues.has(v))
-      .map((value) => ({ kind: 'function' as const, value, label: `${value} 전체` }))
+      .map((value) => ({
+        kind: 'function' as const,
+        value,
+        label: sharedTargetLabel({ target_type: 'function', target_value: value }),
+      }))
     const extraDept: Candidate[] = [...deptTargets]
       .filter((v) => !matchedValues.has(v))
-      .map((value) => {
-        const { org, fn } = parseDeptTargetValue(value)
-        return {
-          kind: 'dept' as const,
-          value,
-          label: org && fn ? `${org} › ${fn}` : value,
-        }
-      })
+      .map((value) => ({
+        kind: 'dept' as const,
+        value,
+        label: sharedTargetLabel({ target_type: 'dept', target_value: value }),
+      }))
     return [...matched, ...extraFn, ...extraDept]
   }, [allCandidates, selectedValues, fnTargets, deptTargets])
 
