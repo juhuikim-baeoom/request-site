@@ -9,7 +9,7 @@ export type RequestStatus = '접수' | '진행중' | '검수대기' | '보류' |
  *  진행중 → 완료 직행은 없다. 완료에 도달하려면 반드시 검수대기를 거친다. */
 const ALLOWED: Record<RequestStatus, RequestStatus[]> = {
   '접수':   ['진행중', '반려', '철회'],
-  '진행중': ['검수대기', '보류', '반려'],
+  '진행중': ['검수대기', '보류', '반려', '접수'], // 완료 직행 불가(검수대기 경유) · 접수: 배정 취소(되돌리기)
   '검수대기': ['완료', '진행중'],
   '보류':   ['진행중'],
   '완료':   ['진행중'],
@@ -106,7 +106,8 @@ export async function changeStatus({
       throw new TransitionError('완료 전이에는 completionRoute가 필요합니다', 'MISSING_COMPLETION_ROUTE')
     }
 
-    // reason 컬럼 결정 (대상 상태일 때만 세팅)
+    // 진행중 → 접수(되돌리기): 배정 시 세팅된 값들을 모두 원복해 미배정 상태로 되돌린다.
+    // assignRequest가 status='접수'만 배정 대상으로 삼으므로, 되돌린 뒤 재배정이 가능해야 한다.
     const sets: ReturnType<typeof sql>[] = [sql`status = ${to}`]
     if (to === '완료') {
       sets.push(sql`completion_route = ${completionRoute!}`)
@@ -115,6 +116,22 @@ export async function changeStatus({
       // 이전 완료(예: SYSTEM_FORCED 강제완료 사유)의 흔적이 남아 감사 기록을 오염시키지 않게 한다.
       sets.push(sql`completion_note = ${reason ?? null}`)
     }
+    if (to === '접수') {
+      // 진행중 → 접수 되돌리기(배정 취소): 배정·SLA 관련 필드를 초기화한다.
+      sets.push(
+        sql`assignee_id = null`,
+        sql`impact = null`,
+        sql`priority_level = null`,
+        sql`assigned_at = null`,
+        sql`first_response_at = null`,
+        sql`response_due_at = null`,
+        sql`resolution_due_at = null`,
+        sql`sla_policy_id = null`,
+        sql`sla_response_breached = false`,
+      )
+    }
+
+    // reason 컬럼 결정 (대상 상태일 때만 세팅)
     if (to === '보류' && reason != null) {
       sets.push(sql`hold_reason = ${reason}`)
     } else if (to === '반려' && reason != null) {

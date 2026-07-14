@@ -1,6 +1,7 @@
-import { useRef, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { useState } from 'react'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../../auth/useAuth'
+import { CommentComposer } from './CommentComposer'
 import { Badge } from '../../components/Badge'
 import { VisibilityBadge } from '../../components/VisibilityBadge'
 import {
@@ -78,6 +79,12 @@ export function RequestDetail() {
   const { profile } = useAuth()
   const isSystemUser = profile?.role === 'system'
 
+  // 진입 경로(?from=)에 따라 되돌아갈 목록을 정한다. 알림 등 출처 없는 진입은 내 요청 목록.
+  const [searchParams] = useSearchParams()
+  const backToBoard = searchParams.get('from') === 'board' && isSystemUser
+  const backTo = backToBoard ? '/board' : '/requests/mine'
+  const backLabel = backToBoard ? '관리 보드' : '내 요청 목록'
+
   const { data, isLoading, error } = useRequestDetail(id)
   const { data: attachments } = useRequestAttachments(id)
   const { data: history } = useRequestHistory(id)
@@ -97,11 +104,17 @@ export function RequestDetail() {
   const [editDue, setEditDue] = useState('')
   const [actionError, setActionError] = useState<string | null>(null)
 
-  // 댓글 작성기
-  const [commentBody, setCommentBody] = useState('')
-  const [commentInternal, setCommentInternal] = useState(true)
-  const [commentFiles, setCommentFiles] = useState<File[]>([])
-  const fileInputRef = useRef<HTMLInputElement>(null)
+  // 타임라인 행 펼침 (코드·로그가 담긴 코멘트 전문 보기)
+  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
+
+  function toggleRow(key: string) {
+    setExpandedRows((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
 
   // 재작업
   const [showReworkModal, setShowReworkModal] = useState(false)
@@ -111,24 +124,24 @@ export function RequestDetail() {
     window.open(getAttachmentUrl(attachmentId), '_blank', 'noopener')
   }
 
-  async function handleAddComment(e: React.FormEvent) {
-    e.preventDefault()
-    if (!commentBody.trim()) return
+  /** 코멘트 등록 + 첨부 업로드. 성공하면 null, 실패하면 오류 메시지를 반환한다. */
+  async function submitComment(
+    body: string,
+    files: File[],
+    isInternal: boolean,
+  ): Promise<string | null> {
     try {
       const result = await addComment.mutateAsync({
-        body: commentBody,
-        is_internal: isSystemUser ? commentInternal : false,
+        body,
+        is_internal: isSystemUser ? isInternal : false,
       })
-      const commentId = result.id
       // 첨부 업로드 (comment_id 링크)
-      for (const file of commentFiles) {
-        await uploadCommentAttachment.mutateAsync({ file, commentId })
+      for (const file of files) {
+        await uploadCommentAttachment.mutateAsync({ file, commentId: result.id })
       }
-      setCommentBody('')
-      setCommentFiles([])
-      if (fileInputRef.current) fileInputRef.current.value = ''
-    } catch {
-      // 오류는 mutation 상태로 처리
+      return null
+    } catch (err) {
+      return err instanceof Error ? err.message : '코멘트 등록 중 오류가 발생했습니다.'
     }
   }
 
@@ -192,7 +205,7 @@ export function RequestDetail() {
     return (
       <div className="p-8 text-center text-gray-500">
         요청을 찾을 수 없거나 접근 권한이 없습니다.{' '}
-        <Link to="/requests/mine" className="text-brand hover:underline">
+        <Link to={backTo} className="text-brand hover:underline">
           목록으로
         </Link>
       </div>
@@ -259,9 +272,9 @@ export function RequestDetail() {
   timeline.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0))
 
   return (
-    <section className="mx-auto max-w-3xl space-y-6 pb-12">
-      <Link to="/requests/mine" className="text-sm text-gray-500 hover:text-brand">
-        ← 내 요청 목록
+    <section className="space-y-6 pb-12">
+      <Link to={backTo} className="text-sm text-gray-500 hover:text-brand">
+        ← {backLabel}
       </Link>
 
       {/* 헤더 */}
@@ -540,72 +553,106 @@ export function RequestDetail() {
         {timeline.length === 0 ? (
           <p className="mt-2 text-sm text-gray-400">아직 활동이 없습니다.</p>
         ) : (
-          <ol className="mt-3 space-y-3">
-            {timeline.map((item) => (
-              <li
-                key={`${item.kind}-${item.id}`}
-                className={[
-                  'relative rounded-lg border p-3 text-sm',
-                  item.kind === 'comment' && item.isInternal
-                    ? 'border-amber-200 bg-amber-50'
-                    : item.kind === 'history'
-                      ? 'border-gray-200 bg-white'
-                      : 'border-gray-200 bg-white',
-                ].join(' ')}
-              >
-                {/* 헤더 */}
-                <div className="flex flex-wrap items-center gap-2 text-xs text-gray-400">
-                  {item.kind === 'history' && (
-                    <span className="rounded bg-gray-100 px-1.5 py-0.5 font-medium text-gray-500">
-                      상태변경
-                    </span>
-                  )}
-                  {item.kind === 'comment' && item.isInternal && (
-                    <span className="rounded bg-amber-200 px-1.5 py-0.5 font-medium text-amber-800">
-                      내부메모
-                    </span>
-                  )}
-                  {item.kind === 'comment' && !item.isInternal && (
-                    <span className="rounded bg-blue-100 px-1.5 py-0.5 font-medium text-blue-700">
-                      코멘트
-                    </span>
-                  )}
-                  {item.kind === 'attachment' && (
-                    <span className="rounded bg-gray-100 px-1.5 py-0.5 font-medium text-gray-500">
-                      첨부
-                    </span>
-                  )}
-                  <span className="font-medium text-gray-600">
-                    {item.isSystem ? '시스템' : (item.actorName ?? '알 수 없음')}
-                  </span>
-                  <span>{fmtDateTime(item.at)}</span>
-                </div>
-
-                {/* 본문 */}
-                {item.kind === 'history' && (
-                  <p className="mt-1 text-gray-700">
-                    {item.fromStatus ?? '—'} →{' '}
-                    <span className="font-semibold">{item.toStatus}</span>
-                  </p>
-                )}
-                {item.kind === 'comment' && item.body && (
-                  <p className="mt-1 whitespace-pre-wrap text-gray-800">{item.body}</p>
-                )}
-                {item.kind === 'attachment' && (
-                  <button
-                    onClick={() => item.attachmentId && handleDownload(item.attachmentId)}
-                    className="mt-1 text-brand hover:underline"
-                  >
-                    {item.fileName ?? '첨부파일'}
-                    {item.fileSize != null && (
-                      <span className="ml-1.5 text-xs text-gray-400">
-                        {Math.ceil(item.fileSize / 1024)} KB
+          <ol className="mt-3 divide-y divide-gray-100 rounded-lg border border-gray-200 bg-white">
+            {timeline.map((item) => {
+              const internal = item.kind === 'comment' && item.isInternal
+              const rowKey = `${item.kind}-${item.id}`
+              // 줄바꿈이 있는 코멘트(코드·로그)는 한 줄에 담기지 않으므로 펼침을 제공한다.
+              const expandable = item.kind === 'comment' && (item.body ?? '').includes('\n')
+              const open = expandable && expandedRows.has(rowKey)
+              return (
+                <li
+                  key={rowKey}
+                  className={['px-3 py-2 text-sm', internal ? 'bg-amber-50' : ''].join(' ')}
+                >
+                  <div className="flex items-center gap-2">
+                    {/* 유형 */}
+                    {item.kind === 'history' && (
+                      <span className="shrink-0 rounded bg-gray-100 px-1.5 py-0.5 text-xs font-medium text-gray-500">
+                        상태변경
                       </span>
                     )}
-                  </button>
-                )}
-              </li>
-            ))}
+                    {internal && (
+                      <span className="shrink-0 rounded bg-amber-200 px-1.5 py-0.5 text-xs font-medium text-amber-800">
+                        내부메모
+                      </span>
+                    )}
+                    {item.kind === 'comment' && !item.isInternal && (
+                      <span className="shrink-0 rounded bg-blue-100 px-1.5 py-0.5 text-xs font-medium text-blue-700">
+                        코멘트
+                      </span>
+                    )}
+                    {item.kind === 'attachment' && (
+                      <span className="shrink-0 rounded bg-gray-100 px-1.5 py-0.5 text-xs font-medium text-gray-500">
+                        첨부
+                      </span>
+                    )}
+
+                    {/* 내용 — 한 행, 넘치면 말줄임 */}
+                    {item.kind === 'history' && (
+                      <span className="min-w-0 flex-1 truncate text-gray-700">
+                        {item.fromStatus ?? '—'} →{' '}
+                        <span className="font-semibold">{item.toStatus}</span>
+                      </span>
+                    )}
+                    {item.kind === 'comment' &&
+                      (expandable ? (
+                        <button
+                          type="button"
+                          onClick={() => toggleRow(rowKey)}
+                          aria-expanded={open}
+                          className="flex min-w-0 flex-1 items-center gap-1 text-left text-gray-800 hover:text-brand"
+                        >
+                          <span className="shrink-0 text-xs text-gray-400">
+                            {open ? '▾' : '▸'}
+                          </span>
+                          <span className="min-w-0 truncate">
+                            {(item.body ?? '').split('\n')[0]}
+                          </span>
+                        </button>
+                      ) : (
+                        <span
+                          className="min-w-0 flex-1 truncate text-gray-800"
+                          title={item.body ?? undefined}
+                        >
+                          {item.body}
+                        </span>
+                      ))}
+                    {item.kind === 'attachment' && (
+                      <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
+                        <button
+                          onClick={() => item.attachmentId && handleDownload(item.attachmentId)}
+                          className="min-w-0 truncate text-brand hover:underline"
+                          title={item.fileName ?? undefined}
+                        >
+                          {item.fileName ?? '첨부파일'}
+                        </button>
+                        {item.fileSize != null && (
+                          <span className="shrink-0 text-xs text-gray-400">
+                            {Math.ceil(item.fileSize / 1024)} KB
+                          </span>
+                        )}
+                      </span>
+                    )}
+
+                    {/* 작성자·시각 */}
+                    <span className="shrink-0 text-xs font-medium text-gray-600">
+                      {item.isSystem ? '시스템' : (item.actorName ?? '알 수 없음')}
+                    </span>
+                    <span className="shrink-0 text-xs tabular-nums text-gray-400">
+                      {fmtDateTime(item.at)}
+                    </span>
+                  </div>
+
+                  {/* 펼침: 코드·로그 전문 */}
+                  {open && (
+                    <pre className="mt-2 overflow-x-auto rounded border border-gray-200 bg-gray-50 p-2 font-mono text-xs leading-relaxed text-gray-800">
+                      {item.body}
+                    </pre>
+                  )}
+                </li>
+              )
+            })}
           </ol>
         )}
       </div>
@@ -618,95 +665,20 @@ export function RequestDetail() {
             완료된 요청에 결과 코멘트나 추가 첨부를 남길 수 있습니다.
           </p>
         )}
-        <form onSubmit={(e) => void handleAddComment(e)} className="mt-3 space-y-3">
-          {/* 시스템팀: 내부메모/공개 토글 */}
-          {isSystemUser && (
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={() => setCommentInternal(true)}
-                className={[
-                  'rounded-md px-3 py-1 text-xs font-medium transition-colors',
-                  commentInternal
-                    ? 'bg-amber-200 text-amber-800'
-                    : 'border border-gray-200 text-gray-500 hover:bg-gray-50',
-                ].join(' ')}
-              >
-                내부메모
-              </button>
-              <button
-                type="button"
-                onClick={() => setCommentInternal(false)}
-                className={[
-                  'rounded-md px-3 py-1 text-xs font-medium transition-colors',
-                  !commentInternal
-                    ? 'bg-blue-100 text-blue-700'
-                    : 'border border-gray-200 text-gray-500 hover:bg-gray-50',
-                ].join(' ')}
-              >
-                공개
-              </button>
-            </div>
-          )}
-          <textarea
-            className={[
-              'block w-full resize-y rounded-md border px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-1',
-              isSystemUser && commentInternal
-                ? 'border-amber-300 bg-amber-50 focus:border-amber-400 focus:ring-amber-300'
-                : 'border-gray-300 bg-white focus:border-brand focus:ring-brand',
-            ].join(' ')}
-            rows={3}
-            value={commentBody}
-            onChange={(e) => setCommentBody(e.target.value)}
-            placeholder={
-              isSystemUser && commentInternal
-                ? '내부 메모 (요청자에게 노출되지 않습니다)'
-                : '코멘트를 입력하세요'
-            }
+        <div className="mt-3 space-y-3">
+          {/* 위: 공개 코멘트 */}
+          <CommentComposer
+            variant="public"
+            onSubmit={(body, files) => submitComment(body, files, false)}
           />
-          {/* 파일 첨부 */}
-          <div className="flex items-center gap-2">
-            <label className="cursor-pointer rounded-md border border-gray-300 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-50">
-              파일 첨부
-              <input
-                ref={fileInputRef}
-                type="file"
-                multiple
-                className="sr-only"
-                onChange={(e) => {
-                  setCommentFiles(Array.from(e.target.files ?? []))
-                }}
-              />
-            </label>
-            {commentFiles.length > 0 && (
-              <span className="text-xs text-gray-500">
-                {commentFiles.map((f) => f.name).join(', ')}
-              </span>
-            )}
-          </div>
-          <div className="flex justify-end">
-            <button
-              type="submit"
-              disabled={
-                addComment.isPending ||
-                uploadCommentAttachment.isPending ||
-                !commentBody.trim()
-              }
-              className="rounded-md bg-brand px-4 py-1.5 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-60"
-            >
-              {addComment.isPending || uploadCommentAttachment.isPending
-                ? '등록 중…'
-                : '코멘트 등록'}
-            </button>
-          </div>
-          {addComment.isError && (
-            <p className="text-xs text-red-600">
-              {addComment.error instanceof Error
-                ? addComment.error.message
-                : '코멘트 등록 중 오류가 발생했습니다.'}
-            </p>
+          {/* 아래: 내부 메모 (시스템팀 전용 · 코드 입력용) */}
+          {isSystemUser && (
+            <CommentComposer
+              variant="internal"
+              onSubmit={(body, files) => submitComment(body, files, true)}
+            />
           )}
-        </form>
+        </div>
       </div>
     </section>
   )

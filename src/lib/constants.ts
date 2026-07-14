@@ -56,7 +56,7 @@ export const WIP_LIMIT = 12
 // 진행중 → 완료 직행은 없다. 완료에 도달하려면 반드시 검수대기를 거친다.
 export const ALLOWED_TRANSITIONS: Record<RequestStatus, RequestStatus[]> = {
   접수: ['진행중', '반려', '철회'],
-  진행중: ['검수대기', '보류', '반려'],
+  진행중: ['검수대기', '보류', '반려', '접수'], // 완료 직행 불가(검수대기 경유) · 접수: 배정 취소(되돌리기)
   검수대기: ['완료', '진행중'],
   보류: ['진행중'],
   완료: ['진행중'], // 이의 수락 경로로만
@@ -162,6 +162,14 @@ export const TYPE_FIELDS: Record<RequestTypeCode, IntakeField[]> = {
     { key: 'target_file', label: '대상 파일', placeholder: '변경할 파일 경로 또는 이름', required: true },
     { key: 'change_detail', label: '변경 내용', placeholder: '어떤 내용으로 변경해야 하는지 적어주세요', required: true },
   ],
+}
+
+// 유형별 아이콘 (카드 UI용)
+export const TYPE_ICON: Record<RequestTypeCode, string> = {
+  error: '🐞',
+  feature: '✨',
+  data: '📊',
+  file: '📄',
 }
 
 // 유형별 상세내용 작성 안내문구 (요구사항 §2)

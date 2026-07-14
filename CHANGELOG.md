@@ -25,8 +25,33 @@
 - 재작업률(`rework_rate`)이 검수대기 반려(`검수대기 → 진행중`)도 포함하도록 넓어졌다. 완료 → 진행중(이의제기 수락)만 세던 기존 정의보다 넓다.
 - CSAT를 thumbs(👍/👎, `rating -1/1`)에서 1~5점 별점으로 전환했다. 수집 시점도 별도 `/csat` 엔드포인트 호출에서 요청자의 검수 승인 순간으로 이동. 대시보드 "만족도" 지표 기준을 `rating >= 4`로 재정의.
 - 구 thumbs CSAT 엔드포인트 `POST /api/requests/:id/csat`와 프론트 `useCsat` 훅을 제거했다(`server/src/routes/request-detail.ts`, `src/features/requests/api.ts`). CSAT가 1-5점 검수 승인 경로로 대체되며 사용되지 않게 됐고, 완료 상태인 `AUTO`/`SYSTEM_FORCED` 건(`csat_rating` null)에 직접 호출 시 thumbs 값 `-1`이 1-5점 컬럼에 잘못 저장될 위험이 있어 제거했다.
+- **요청 상세 되돌아가기 목적지 분기** (`src/features/requests/RequestDetail.tsx`, `src/features/board/ManageBoard.tsx`, `src/features/requests/MyRequests.tsx`): 상세 상단 링크가 항상 `/requests/mine`으로 고정돼 관리 보드에서 진입해도 내 요청 목록으로만 돌아가던 문제 수정. 목록의 카드/표 링크가 진입 경로를 쿼리 파라미터로 넘기고(`?from=board` / `?from=mine`), 상세는 이를 읽어 "← 관리 보드"(`/board`) 또는 "← 내 요청 목록"(`/requests/mine`)을 렌더링한다. 라우터 state 대신 쿼리 파라미터를 쓰므로 새로고침·링크 공유에도 유지된다.
+  - 폴백: `from`이 없거나(알림 벨 진입 등) 알 수 없는 값, 또는 `from=board`인데 system 역할이 아니면 내 요청 목록. 오류 상태의 "목록으로" 링크도 같은 목적지를 따른다.
+- **활동 타임라인 1행 리스트화** (`src/features/requests/RequestDetail.tsx`): 항목마다 카드(2행: 헤더+본문)로 쌓이던 구조를 단일 섹션 안의 구분선 리스트로 변경. 한 항목 = 한 행(`유형 뱃지 · 내용 · 작성자 · 시각`), 긴 코멘트·파일명은 말줄임. 줄바꿈이 포함된 코멘트(코드·로그)는 ▸ 토글로 펼쳐 `<pre>` 전문(가로 스크롤)을 보여준다. 내부메모 행은 amber 배경 유지.
+- **코멘트 작성기 공개/내부 상하 분리** (`src/features/requests/CommentComposer.tsx` 신규, `RequestDetail.tsx`): 내부메모/공개 토글 버튼(탭 방식)을 제거하고 공개 코멘트(위)·내부 메모(아래)를 각각 독립 폼으로 배치. 시스템팀에게만 내부 메모 폼이 보인다. 내부 메모는 코드·로그 입력을 전제로 monospace · 8행 · `wrap="off"` · spellcheck off · Tab 2칸 들여쓰기(Esc 후 Tab은 포커스 이동으로 빠져나감). 폼별로 본문·첨부·제출 상태와 오류 메시지를 각자 관리한다.
+- **진행중 → 접수 되돌리기(배정 취소) 허용** (`server/src/services/transition.ts`, `src/lib/constants.ts`): 허용 전이 매트릭스에 `진행중 → 접수`를 추가. 관리 보드에서 개별 드래그·리스트 인라인 select·벌크 상태 일괄변경 모두에서 진행중 건을 접수로 되돌릴 수 있다. 이전에는 매트릭스에 없어 서버가 `ILLEGAL_TRANSITION`으로 거부했다.
+  - 되돌릴 때 서버가 배정 정보를 초기화한다: `assignee_id`·`impact`·`priority_level`·`assigned_at`·`first_response_at`·`response_due_at`·`resolution_due_at`·`sla_policy_id` → null, `sla_response_breached` → false. 미배정 큐로 복귀하며 재배정이 가능하다(`assignRequest`는 `status='접수'`만 대상으로 삼음).
+  - 회귀 테스트 추가: `server/scripts/test-transition.ts` (15) 진행중 → 접수 되돌리기 + 배정 초기화.
 
 ### Added
+- **접수폼 2-페인 레이아웃 재설계** (`src/features/requests/RequestForm.tsx`, `src/features/requests/BodyEditorSlot.tsx`, `src/lib/constants.ts`)
+  - 레이아웃: `grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_340px]` 셸 + `max-w-[1600px]` 상한. ≥lg 2-페인, <lg 단일 컬럼 + 모바일 하단 고정 제출바(`env(safe-area-inset-bottom)`).
+  - 유형 선택: 드롭다운 → 네이티브 `<input type="radio">` 카드화(아이콘+라벨+힌트). `TYPE_ICON` 상수 맵 추가. `useRequestTypes()` 동적 렌더, 로딩/빈 상태 처리.
+  - 에디터 슬롯: `BodyEditorSlot.tsx` 분리(잠정 textarea, plain text body). 향후 서상연 팀장 에디터 교체 대비 슬롯 props 계약 명문화.
+  - 첨부 드롭존: 드래그드롭 + 숨김 input+label(키보드 선택) + drag-over 상태 + 파일 칩(제거 버튼). 파일당 20MB 클라이언트 사전검증(서버 제한과 일치).
+  - 사이드바(속성·공유): 긴급도·희망완료일 2열 → 공개범위 → 공유대상(기본 접힘, 선택 수 뱃지, 접어도 선택 보존) → 제출.
+  - `useCreateRequest` 개선: 첨부 부분 업로드 실패 시 요청 중복 생성 없이 `{ id, seq, failedFiles, totalFiles }` 반환. 성공 화면에서 실패 파일만 기존 id로 재시도. "N건 중 M건 실패" 메시지에 `totalFiles`(N) 사용.
+  - 접근성: 제출 검증 실패 시 첫 오류 필드로 포커스+scrollIntoView 이동. 제출 중 버튼 disabled + 입력 잠금.
+
+### Fixed
+- **접수폼 접근성 — 모바일 제출바 AT 접근 불가** (`RequestForm.tsx`): 모바일 하단 고정 제출바 컨테이너 `aria-hidden="true"` 제거. 스크린리더에서 '접수하기' 버튼 접근 가능.
+- **접수폼 접근성 — 모바일 제출 버튼 form 연결 오류** (`RequestForm.tsx`): `<form id="request-form">` 추가, 버튼 `form="request-form-hidden"` → `form="request-form"` 수정. native form submission 정상화.
+- **접수폼 접근성 — 유형 카드 aria-invalid 미표시** (`RequestForm.tsx`): type_code 오류 시 모든 radio에 `aria-invalid` + `aria-describedby="error-type_code"` 추가.
+- **접수폼 접근성 — focusFirstError type_code 포커스 대상** (`RequestForm.tsx`): `fieldset`에 `id="fieldset-type_code" tabIndex={-1}` 추가. 오류 시 sr-only radio 대신 fieldset으로 포커스/스크롤해 시각 사용자도 이동 인지.
+- **접수폼 접근성 — share-panel aria-controls 참조 DOM 부재** (`RequestForm.tsx`): `{shareOpen && <div>}` 조건부 렌더 → `<div hidden={!shareOpen}>` 방식으로 변경. `aria-controls="share-panel"` 항상 유효한 DOM 참조 유지.
+- **접수폼 사이드바 2열 그리드 브레이크포인트** (`RequestForm.tsx`): `grid-cols-1 sm:grid-cols-2` → `grid-cols-[repeat(auto-fit,minmax(120px,1fr))]`. 뷰포트 기반 sm 대신 컨테이너 폭 기반 auto-fit으로 좁은 폭/확대 시 1열 fallback.
+- **접수폼 부분 실패 메시지 총 파일 수 누락** (`RequestForm.tsx`, `api.ts`): `CreateRequestResult`에 `totalFiles: number` 추가. "첨부 N건 중 M건 실패"에서 N = `totalFiles`(시도 총 건수), M = `failedFiles.length`(실패 건수)로 정확히 표시.
+
 - **P7 계정 관리 UI** (`src/features/accounts/Accounts.tsx`, `src/features/accounts/api.ts`)
   - `useUsers` 훅: `GET /api/users` 호출, 30s staleTime.
   - `useUpdateUser(userId)` 훅: `PATCH /api/users/:id` — role/dept/org_affil/dept_function 부분 수정.

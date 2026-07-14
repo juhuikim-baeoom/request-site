@@ -13,6 +13,7 @@ import { eq, sql } from 'drizzle-orm'
 import { loginAsDev } from '../src/routes/helpers.js'
 import { changeStatus, TransitionError } from '../src/services/transition.js'
 import { notify } from '../src/services/notify.js'
+import { assignRequest } from '../src/services/assign.js'
 
 /** 비동기(fire-and-forget) 알림 INSERT가 완료될 때까지 짧게 대기 */
 function tick(): Promise<void> {
@@ -352,6 +353,39 @@ await db.delete(users).where(eq(users.id, otherRequester.id))
   assert.equal(recompleted.rows[0].completion_route, 'REQUESTER', 'completion_route가 REQUESTER로 갱신되어야 함')
   assert.equal(recompleted.rows[0].completion_note, null, '이전 강제 완료 사유가 새 완료에서는 지워져야 함')
   console.log('(14) 재작업 후 재완료 시 이전 completion_note가 지워짐 OK')
+  await db.delete(requests).where(eq(requests.id, req.id))
+}
+
+// ──────────────────────────────────────────
+// (15) 진행중 → 접수 되돌리기 — 배정 정보 초기화
+// ──────────────────────────────────────────
+{
+  const req = await makeRequest()
+  await assignRequest({ reqId: req.id, assigneeId: actorId, impact: '보통', actorId })
+  const assigned = await db.execute<any>(
+    sql`select status, assignee_id, assigned_at, priority_level from requests where id = ${req.id}`,
+  )
+  assert.equal(assigned.rows[0].status, '진행중')
+  assert.ok(assigned.rows[0].assignee_id, '배정 후 assignee_id 존재')
+
+  await changeStatus({ reqId: req.id, to: '접수', actorId })
+  const back = await db.execute<any>(sql`
+    select status, assignee_id, impact, priority_level, assigned_at, first_response_at,
+           response_due_at, resolution_due_at, sla_policy_id, sla_response_breached
+    from requests where id = ${req.id}
+  `)
+  const b = back.rows[0]
+  assert.equal(b.status, '접수', '진행중 → 접수 전이')
+  assert.equal(b.assignee_id, null, 'assignee_id 초기화')
+  assert.equal(b.impact, null, 'impact 초기화')
+  assert.equal(b.priority_level, null, 'priority_level 초기화')
+  assert.equal(b.assigned_at, null, 'assigned_at 초기화')
+  assert.equal(b.first_response_at, null, 'first_response_at 초기화')
+  assert.equal(b.response_due_at, null, 'response_due_at 초기화')
+  assert.equal(b.resolution_due_at, null, 'resolution_due_at 초기화')
+  assert.equal(b.sla_policy_id, null, 'sla_policy_id 초기화')
+  assert.equal(b.sla_response_breached, false, 'sla_response_breached 초기화')
+  console.log('(15) 진행중 → 접수 되돌리기 + 배정 초기화 OK')
   await db.delete(requests).where(eq(requests.id, req.id))
 }
 
