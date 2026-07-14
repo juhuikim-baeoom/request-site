@@ -1,5 +1,5 @@
-import { useId, useMemo, useRef, useState } from 'react'
-import { FUNCTION_TARGETS, deptTargetValue } from '../../lib/constants'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { FUNCTION_TARGETS, deptTargetValue, parseDeptTargetValue } from '../../lib/constants'
 import { useDeptOptions } from './api'
 
 export interface SharingTargetPickerProps {
@@ -36,6 +36,7 @@ export function SharingTargetPicker({
   const [open, setOpen] = useState(false)
   const [activeIndex, setActiveIndex] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
+  const listRef = useRef<HTMLUListElement>(null)
   const listId = useId()
   const optionId = (i: number) => `${listId}-opt-${i}`
 
@@ -69,11 +70,29 @@ export function SharingTargetPicker({
     )
   }, [allCandidates, selectedValues, query])
 
-  // 선택된 것 — 칩으로 표시 (후보 목록과 같은 라벨 규칙을 쓴다)
-  const selected = useMemo(
-    () => allCandidates.filter((c) => selectedValues.has(c.value)),
-    [allCandidates, selectedValues],
-  )
+  // 선택된 것 — 칩으로 표시.
+  // 부모 Set(fnTargets·deptTargets)이 SSOT다. 후보 목록(allCandidates)에서 라벨을 찾되,
+  // 후보에 없는 값(조직도에서 빠졌거나 useDeptOptions()가 아직 로딩/실패 중인 경우)도
+  // 반드시 칩으로 만든다 — 그러지 않으면 "칩은 없는데 저장하면 되살아나는" 유령 공유가 된다.
+  // 값 자체(target_value)는 절대 새로 만들지 않고, 사람이 읽을 라벨만 만든다.
+  const selected = useMemo<Candidate[]>(() => {
+    const matched = allCandidates.filter((c) => selectedValues.has(c.value))
+    const matchedValues = new Set(matched.map((c) => c.value))
+    const extraFn: Candidate[] = [...fnTargets]
+      .filter((v) => !matchedValues.has(v))
+      .map((value) => ({ kind: 'function' as const, value, label: `${value} 전체` }))
+    const extraDept: Candidate[] = [...deptTargets]
+      .filter((v) => !matchedValues.has(v))
+      .map((value) => {
+        const { org, fn } = parseDeptTargetValue(value)
+        return {
+          kind: 'dept' as const,
+          value,
+          label: org && fn ? `${org} › ${fn}` : value,
+        }
+      })
+    return [...matched, ...extraFn, ...extraDept]
+  }, [allCandidates, selectedValues, fnTargets, deptTargets])
 
   function add(c: Candidate) {
     if (c.kind === 'function') {
@@ -102,6 +121,15 @@ export function SharingTargetPicker({
     }
   }
 
+  // 목록이 max-h-56(약 7개 높이)로 잘려 있어, 검색어 없이 17개가 뜬 상태에서
+  // ArrowDown으로 8번째 이후로 내려가면 activeIndex만 바뀌고 화면 밖으로 나간다.
+  // 활성 항목이 항상 보이도록 스크롤을 따라가게 한다.
+  useEffect(() => {
+    if (!open) return
+    const el = listRef.current?.querySelector<HTMLElement>(`#${CSS.escape(optionId(activeIndex))}`)
+    el?.scrollIntoView({ block: 'nearest' })
+  }, [open, activeIndex])
+
   function onKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key === 'ArrowDown') {
       e.preventDefault()
@@ -120,6 +148,11 @@ export function SharingTargetPicker({
         if (candidates[activeIndex]) {
           add(candidates[activeIndex])
         }
+      } else if (query !== '') {
+        // Esc로 목록만 닫은 뒤에도 입력칸에 검색어가 남아 있으면, 그 Enter가
+        // 부모 폼(접수 폼) 제출로 새면 안 된다. 매칭되는 후보를 고르는 게 아니라
+        // 그냥 제출을 막기만 한다 — 활성 후보를 고르는 건 목록이 열려 있을 때만.
+        e.preventDefault()
       }
     } else if (e.key === 'Escape') {
       setOpen(false)
@@ -170,25 +203,34 @@ export function SharingTargetPicker({
           보조기기 접근성 트리에서도 제외되어, 닫힌 listbox가 노출되는 문제도 함께 막는다.
         */}
         <ul
+          ref={listRef}
           id={listId}
           role="listbox"
           hidden={!open || disabled}
           className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-md border border-gray-200 bg-white py-1 shadow-lg"
         >
           {candidates.length === 0 ? (
-            <li className="px-3 py-2 text-xs text-gray-400">일치하는 팀·부서가 없습니다.</li>
+            // listbox의 자식은 option/group만 허용된다 — 빈 상태 문구도 role="option"으로 두되
+            // 고를 수 없는 항목임을 aria-disabled로 알린다(선택 불가이므로 id·onClick 없음).
+            <li role="option" aria-disabled="true" className="px-3 py-2 text-xs text-gray-400">
+              일치하는 팀·부서가 없습니다.
+            </li>
           ) : (
             candidates.map((c, i) => (
               <li
                 key={c.value}
                 id={optionId(i)}
                 role="option"
-                aria-selected={i === activeIndex}
+                // aria-selected는 "선택됨"을 뜻한다 — 이 목록의 항목은 선택되는 순간 후보에서
+                // 빠지므로 여기 남은 항목은 정의상 전부 미선택이다. "지금 활성(포커스)"는
+                // aria-activedescendant(입력칸에 지정)가 이미 전달하므로 여기서는 생략한다.
                 onMouseDown={(e) => e.preventDefault()} // blur보다 먼저 클릭이 처리되게
                 onClick={() => add(c)}
                 onMouseEnter={() => setActiveIndex(i)}
-                className={`cursor-pointer px-3 py-1.5 text-sm ${
-                  i === activeIndex ? 'bg-brand/10 text-brand' : 'text-gray-700'
+                className={`cursor-pointer border-l-2 px-3 py-1.5 text-sm ${
+                  i === activeIndex
+                    ? 'border-brand bg-brand/10 font-medium text-brand'
+                    : 'border-transparent text-gray-700'
                 }`}
               >
                 {c.label}
@@ -200,7 +242,7 @@ export function SharingTargetPicker({
 
       {/* 선택된 공유대상 — 0개면 렌더하지 않는다 */}
       {selected.length > 0 && (
-        <ul className="mt-2 flex flex-wrap gap-1.5">
+        <ul aria-label="선택된 공유대상" className="mt-2 flex flex-wrap gap-1.5">
           {selected.map((c) => (
             <li
               key={c.value}
