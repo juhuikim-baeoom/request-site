@@ -1,0 +1,113 @@
+name: CI
+
+# PR과 main 푸시에서 자동 검증. 이 저장소에는 그동안 자동 검증이 전혀 없었고,
+# server/scripts의 테스트 23종은 사람이 기억할 때만 돌아갔다.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# 같은 브랜치에 새 푸시가 오면 진행 중인 실행을 취소한다 (러너 낭비 방지).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web:
+    name: 웹 (타입체크 · 빌드)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - run: npm ci
+
+      - name: 타입체크
+        run: npm run typecheck
+
+      - name: 빌드
+        run: npm run build
+
+      # lint 스크립트는 eslint를 호출하지만 eslint가 devDependencies에도
+      # 설정 파일에도 없다 — 실행하면 무조건 실패한다. eslint 도입은 별도 작업.
+
+  server:
+    name: 서버 (타입체크 · 테스트 23종)
+    runs-on: ubuntu-latest
+
+    # 테스트는 Fastify app.inject()로 인-프로세스 호출하므로 서버 프로세스는 필요 없고,
+    # Postgres만 있으면 된다. 버전은 docker-compose.yml과 맞춘다.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: request
+          POSTGRES_PASSWORD: request
+          POSTGRES_DB: request_site
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U request -d request_site"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql://request:request@localhost:5432/request_site
+      # dev-login 엔드포인트는 APP_ENV=local일 때만 등록된다 — 테스트가 이걸로 로그인한다.
+      APP_ENV: local
+      SESSION_SECRET: ci-only-secret-not-a-real-credential-32b
+      WEB_ORIGIN: http://localhost:5173
+
+    defaults:
+      run:
+        working-directory: server
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - run: npm ci
+
+      - name: 타입체크
+        run: npm run typecheck
+
+      # 공식 배포 순서(README) 그대로: migrate → seed.
+      # seed는 juhuikim@baeoom.com을 system_admin으로 만든다 — 테스트가 이 계정으로 로그인한다.
+      - name: DB 마이그레이션
+        run: npm run db:migrate
+
+      - name: DB 시드
+        run: npm run db:seed
+
+      # 테스트는 순서를 지킨다(README §개발 시작과 동일). 하나라도 실패하면 종료코드 ≠ 0.
+      #
+      # 주의: 일부 스크립트(test:users 등)는 픽스처를 정리하지 않아 같은 DB에 두 번 돌리면
+      # unique 위반으로 실패한다. CI는 실행마다 Postgres 서비스가 새로 뜨므로 문제되지 않지만,
+      # 로컬 개발 DB에 반복 실행하면 깨진다. 테스트 위생 개선은 별도 이슈.
+      - name: 인증 · 권한
+        run: npm run test:auth && npm run test:devlogin && npm run test:authz && npm run test:upsert
+
+      - name: API
+        run: npm run test:api && npm run test:api-detail && npm run test:api-write && npm run test:api-attach && npm run test:api-hardening && npm run test:attach-authz
+
+      - name: 도메인 로직 (SLA · 상태전이 · 배정 · 영향도 · 접수)
+        run: npm run test:sla && npm run test:transition && npm run test:assign && npm run test:impact && npm run test:intake
+
+      - name: 코멘트 · 대시보드 · 계정 · 알림 · 공유
+        run: npm run test:comment-internal && npm run test:comment-attach && npm run test:dashboard && npm run test:users && npm run test:roles && npm run test:notifications && npm run test:sharing
+
+      # 깨끗한 DB에 migrate→seed를 돌렸을 때 관리자가 1명 이상 남는지 검증한다.
+      # (임시 DB를 따로 만들어 돌리므로 위 테스트들의 DB 상태에 영향받지 않는다.)
+      - name: 부트스트랩
+        run: npm run test:bootstrap
