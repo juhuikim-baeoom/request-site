@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { sql } from 'drizzle-orm'
 import { db } from '../db/client.js'
 import { authenticate } from '../auth/session.js'
-import { isSystem, canSeeRequest } from '../authz.js'
+import { canProcess, canSeeRequest } from '../authz.js'
 import { parseId } from '../http.js'
 import { raiseDispute, reviewDispute, DisputeError } from '../services/disputes.js'
 
@@ -91,7 +91,7 @@ export async function disputeRoutes(app: FastifyInstance): Promise<void> {
     '/api/disputes/:id',
     async (request, reply) => {
       const u = request.currentUser!
-      if (!isSystem(u)) { reply.code(403); return { error: 'forbidden' } }
+      if (!canProcess(u)) { reply.code(403); return { error: 'forbidden' } }
 
       const id = parseId(request.params.id)
       if (id === null) { reply.code(404); return { error: 'not found' } }

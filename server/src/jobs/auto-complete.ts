@@ -8,7 +8,7 @@ import { INSPECTION_DAYS, INSPECTION_REMINDER_DAYS } from '../services/inspectio
 /** 배치가 상태를 바꿀 때 쓰는 액터. 시스템팀 계정 중 하나를 쓴다. */
 async function systemActorId(): Promise<string | null> {
   const r = await db.execute<{ id: string }>(sql`
-    select id from users where role = 'system' order by created_at limit 1`)
+    select id from users where role in ('system', 'system_admin') order by created_at limit 1`)
   return r.rows[0]?.id ?? null
 }
 

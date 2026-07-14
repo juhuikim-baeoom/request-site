@@ -15,7 +15,9 @@ console.log('anon me ok')
 const sid = await loginAsDev(app)
 const authed = await app.inject({ method: 'GET', url: '/api/auth/me', cookies: { sid } })
 assert.equal(authed.json().user.email, 'juhuikim@baeoom.com')
-assert.equal(authed.json().user.role, 'system')
+// juhuikim@baeoom.com은 역할 모델 도입 시 유일한 초기 관리자로 system_admin에 백필됨
+// (src/db/backfill-roles.ts) — 세션이 실제 DB 역할을 정확히 반영하는지 확인
+assert.equal(authed.json().user.role, 'system_admin')
 console.log('authed me ok')
 
 // 3) 위조: 존재하지 않는 랜덤 세션 토큰(정상 서명)은 거부됨

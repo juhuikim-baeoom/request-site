@@ -40,36 +40,71 @@
     {
       "idx": 5,
       "version": "7",
-      "when": 1784000000000,
-      "tag": "0005_add_inspection_enums",
+      "when": 1784000000010,
+      "tag": "0005_role_model_add_values",
       "breakpoints": true
     },
     {
       "idx": 6,
       "version": "7",
-      "when": 1784000000001,
-      "tag": "0006_inspection_and_disputes",
+      "when": 1784000000020,
+      "tag": "0006_role_backfill_history",
       "breakpoints": true
     },
     {
       "idx": 7,
       "version": "7",
-      "when": 1784000000002,
-      "tag": "0007_completion_note",
+      "when": 1784000000030,
+      "tag": "0007_request_sharing_history",
       "breakpoints": true
     },
     {
       "idx": 8,
       "version": "7",
-      "when": 1784000000003,
-      "tag": "0008_inspection_reminder",
+      "when": 1784000000040,
+      "tag": "0008_gen_seq_gap_tolerant",
       "breakpoints": true
     },
     {
       "idx": 9,
       "version": "7",
-      "when": 1784000000004,
-      "tag": "0009_rearm_inspection_reminder",
+      "when": 1784000000050,
+      "tag": "0009_gen_seq_lpad_overflow",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1784000000060,
+      "tag": "0010_add_inspection_enums",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1784000000070,
+      "tag": "0011_inspection_and_disputes",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1784000000080,
+      "tag": "0012_completion_note",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1784000000090,
+      "tag": "0013_inspection_reminder",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1784000000100,
+      "tag": "0014_rearm_inspection_reminder",
       "breakpoints": true
     }
   ]

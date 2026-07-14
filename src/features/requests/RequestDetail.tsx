@@ -5,26 +5,34 @@ import { CommentComposer } from './CommentComposer'
 import { Badge } from '../../components/Badge'
 import { VisibilityBadge } from '../../components/VisibilityBadge'
 import {
+  ALLOWED_TRANSITIONS,
   STATUS_BADGE,
   PRIORITY_LEVEL_BADGE,
   URGENCY_OPTIONS,
   VISIBILITY_OPTIONS,
+  sharedTargetLabel,
   dueBadgeClass,
 } from '../../lib/constants'
 import { fmtDateTime } from '../../lib/format'
-import type { PriorityLevel, RequestVisibility } from '../../types/database'
+import { canChangeSharing, canProcess, canSeeInternal } from '../../lib/permissions'
+import type { PriorityLevel, RequestStatus, RequestVisibility } from '../../types/database'
 import type { Urgency } from '../../lib/constants'
+import { AdminPanel } from './AdminPanel'
+import { SharingEditor, type SharingValue } from './SharingEditor'
 import {
   getAttachmentUrl,
   useAddComment,
   useCancelRequest,
+  useChangeSharing,
   useRequestAttachments,
   useRequestComments,
   useRequestDetail,
   useRequestHistory,
+  useRequestSharingHistory,
   useRework,
   useUpdateRequest,
   useUploadCommentAttachment,
+  type ImpactLevel,
 } from './api'
 import { InspectionPanel } from './InspectionPanel'
 import { DisputePanel } from './DisputePanel'
@@ -52,7 +60,7 @@ function relDue(isoOrNull: string | null | undefined): string {
 
 // ---------- 타임라인 병합 ----------
 
-type TimelineKind = 'history' | 'comment' | 'attachment'
+type TimelineKind = 'history' | 'comment' | 'attachment' | 'sharing'
 
 interface TimelineItem {
   kind: TimelineKind
@@ -70,39 +78,60 @@ interface TimelineItem {
   fileName?: string | null
   fileSize?: number | null
   attachmentId?: number
+  // sharing
+  fromVisibility?: string | null
+  toVisibility?: string | null
+  added?: Array<{ target_type: string; target_value: string }>
+  removed?: Array<{ target_type: string; target_value: string }>
 }
+
+function visibilityLabel(v: string): string {
+  return VISIBILITY_OPTIONS.find((o) => o.value === v)?.label ?? v
+}
+
+// 공유대상 라벨은 sharedTargetLabel(src/lib/constants.ts)이 SSOT —
+// 뱃지·타임라인·선택 피커가 같은 표기를 쓴다.
+const targetLabel = sharedTargetLabel
 
 export function RequestDetail() {
   const { id: idParam } = useParams<{ id: string }>()
   const id = Number(idParam)
 
   const { profile } = useAuth()
-  const isSystemUser = profile?.role === 'system'
+  // 처리 능력(배정·상태·영향도·필드 편집·재작업)과 내부메모 열람을 분리해서 판정한다.
+  const canProcessRequest = canProcess(profile?.role)
+  const canViewInternal = canSeeInternal(profile?.role)
 
-  // 진입 경로(?from=)에 따라 되돌아갈 목록을 정한다. 알림 등 출처 없는 진입은 내 요청 목록.
+  // 진입 경로(?from=)에 따라 되돌아갈 목록을 정한다. 알림 등 출처 없는 진입은 요청 목록.
   const [searchParams] = useSearchParams()
-  const backToBoard = searchParams.get('from') === 'board' && isSystemUser
+  const backToBoard = searchParams.get('from') === 'board' && canProcessRequest
   const backTo = backToBoard ? '/board' : '/requests/mine'
-  const backLabel = backToBoard ? '관리 보드' : '내 요청 목록'
+  const backLabel = backToBoard ? '요청 처리' : '요청 목록'
 
   const { data, isLoading, error } = useRequestDetail(id)
   const { data: attachments } = useRequestAttachments(id)
   const { data: history } = useRequestHistory(id)
   const { data: comments } = useRequestComments(id)
+  const { data: sharingHistory } = useRequestSharingHistory(id)
   const addComment = useAddComment(id)
   const uploadCommentAttachment = useUploadCommentAttachment(id)
   const updateRequest = useUpdateRequest(id)
   const cancelRequest = useCancelRequest(id)
   const reworkMutation = useRework(id)
+  const changeSharing = useChangeSharing(id)
 
   // 편집 상태
   const [editing, setEditing] = useState(false)
   const [editTitle, setEditTitle] = useState('')
   const [editBody, setEditBody] = useState('')
   const [editUrgency, setEditUrgency] = useState<Urgency>('보통')
-  const [editVisibility, setEditVisibility] = useState<RequestVisibility>('dept')
   const [editDue, setEditDue] = useState('')
   const [actionError, setActionError] = useState<string | null>(null)
+
+  // 공유 범위 수정 상태 — 본문 편집(위)과 권한 조건이 다르므로 분리한다.
+  const [sharingOpen, setSharingOpen] = useState(false)
+  const [sharingDraft, setSharingDraft] = useState<SharingValue | null>(null)
+  const [sharingError, setSharingError] = useState<string | null>(null)
 
   // 타임라인 행 펼침 (코드·로그가 담긴 코멘트 전문 보기)
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
@@ -133,7 +162,7 @@ export function RequestDetail() {
     try {
       const result = await addComment.mutateAsync({
         body,
-        is_internal: isSystemUser ? isInternal : false,
+        is_internal: canViewInternal ? isInternal : false,
       })
       // 첨부 업로드 (comment_id 링크)
       for (const file of files) {
@@ -161,7 +190,6 @@ export function RequestDetail() {
     setEditTitle(v.title ?? '')
     setEditBody(v.body ?? '')
     setEditUrgency((v.urgency as Urgency) ?? '보통')
-    setEditVisibility((v.visibility as RequestVisibility) ?? 'dept')
     setEditDue(v.desired_due ?? '')
     setActionError(null)
     setEditing(true)
@@ -179,7 +207,6 @@ export function RequestDetail() {
         title: editTitle.trim(),
         body: editBody,
         urgency: editUrgency,
-        visibility: editVisibility,
         desired_due: editDue,
       })
       setEditing(false)
@@ -213,9 +240,13 @@ export function RequestDetail() {
   }
 
   const { view: v, requester, assignee, sharedTargets } = data
-  const canEdit = v.requester_id === profile?.id && v.status === '접수'
+  const canEdit = canProcessRequest || (v.requester_id === profile?.id && v.status === '접수')
+  // 공유 범위 수정: 시스템팀 또는 요청자 본인 — 상태 무관(진행중·완료 후에도)
+  const canEditSharing = canChangeSharing(profile?.role, v.requester_id ?? null, profile?.id)
+  // 철회는 전이 매트릭스상 '접수' 상태에서만 유효 (server/src/services/transition.ts ALLOWED와 동일 기준)
+  const canWithdraw = canEdit && (ALLOWED_TRANSITIONS[v.status as RequestStatus] ?? []).includes('철회')
   const isRequester = v.requester_id === profile?.id
-  const canRework = isSystemUser && v.status === '완료'
+  const canRework = canProcessRequest && v.status === '완료'
 
   // ---------- 타임라인 병합 ----------
   const timeline: TimelineItem[] = []
@@ -244,6 +275,22 @@ export function RequestDetail() {
         isSystem: !c.author_id,
         body: c.body,
         isInternal: c.is_internal,
+      })
+    }
+  }
+
+  if (sharingHistory) {
+    for (const s of sharingHistory) {
+      timeline.push({
+        kind: 'sharing',
+        id: s.id,
+        at: s.changed_at,
+        actorName: s.actor?.name ?? null,
+        isSystem: false,
+        fromVisibility: s.from_visibility,
+        toVisibility: s.to_visibility,
+        added: s.added,
+        removed: s.removed,
       })
     }
   }
@@ -295,15 +342,93 @@ export function RequestDetail() {
           )}
         </div>
         <h1 className="mt-2 text-xl font-bold text-gray-900">{v.title}</h1>
-        <div className="mt-2">
+        <div className="mt-2 flex flex-wrap items-center gap-2">
           {v.visibility && (
             <VisibilityBadge
               visibility={v.visibility as RequestVisibility}
               sharedTargets={sharedTargets}
             />
           )}
+          {canEditSharing && (
+            <button
+              type="button"
+              onClick={() => {
+                // 현재 값으로 초안 초기화 — sharedTargets는 상세 응답에 이미 들어 있다
+                setSharingDraft({
+                  visibility: (v.visibility as RequestVisibility) ?? 'dept',
+                  fnTargets: new Set(
+                    sharedTargets.filter((t) => t.target_type === 'function').map((t) => t.target_value),
+                  ),
+                  deptTargets: new Set(
+                    sharedTargets.filter((t) => t.target_type === 'dept').map((t) => t.target_value),
+                  ),
+                })
+                setSharingError(null)
+                setSharingOpen(true)
+              }}
+              className="rounded-md border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
+            >
+              공유 범위 수정
+            </button>
+          )}
         </div>
       </div>
+
+      {/* 공유 범위 수정 패널 — 본문 편집 폼과 분리(권한 조건이 다름: 시스템팀 또는 요청자 본인, 상태 무관) */}
+      {sharingOpen && sharingDraft && (
+        <section aria-label="공유 범위 수정" className="rounded-xl border border-gray-200 bg-white p-4">
+          {sharingError && (
+            <p role="alert" className="mb-2 rounded-md bg-red-50 px-3 py-2 text-xs text-red-700">
+              {sharingError}
+            </p>
+          )}
+          <SharingEditor
+            value={sharingDraft}
+            onChange={setSharingDraft}
+            disabled={changeSharing.isPending}
+          />
+          <div className="mt-4 flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setSharingOpen(false)}
+              className="rounded-md border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
+            >
+              취소
+            </button>
+            <button
+              type="button"
+              disabled={changeSharing.isPending}
+              onClick={() => {
+                if (!sharingDraft) return
+                setSharingError(null)
+                changeSharing.mutate(
+                  {
+                    visibility: sharingDraft.visibility,
+                    shared_targets: [
+                      ...[...sharingDraft.fnTargets].map((tv) => ({
+                        target_type: 'function' as const,
+                        target_value: tv,
+                      })),
+                      ...[...sharingDraft.deptTargets].map((tv) => ({
+                        target_type: 'dept' as const,
+                        target_value: tv,
+                      })),
+                    ],
+                  },
+                  {
+                    onSuccess: () => setSharingOpen(false),
+                    onError: (err) =>
+                      setSharingError(err instanceof Error ? err.message : String(err)),
+                  },
+                )
+              }}
+              className="rounded-md bg-brand px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-dark disabled:opacity-50"
+            >
+              저장
+            </button>
+          </div>
+        </section>
+      )}
 
       {/* SLA + 담당자·우선순위 요약 */}
       <div className="flex flex-wrap items-center gap-4 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm">
@@ -330,6 +455,18 @@ export function RequestDetail() {
         )}
       </div>
 
+      {/* 처리 능력 보유자 전용 관리 패널 — 담당자·상태·영향도를 상세 화면에서 바로 변경 */}
+      {canProcessRequest && (
+        <AdminPanel
+          requestId={id}
+          status={v.status as RequestStatus}
+          assigneeId={v.assignee_id ?? null}
+          impact={(v.impact as ImpactLevel) ?? null}
+          priorityLevel={v.priority_level ?? null}
+          urgency={(v.urgency as Urgency) ?? null}
+        />
+      )}
+
       {/* 액션 버튼 영역 */}
       {(canEdit || canRework) && !editing && (
         <div className="flex flex-wrap gap-2">
@@ -341,13 +478,15 @@ export function RequestDetail() {
               >
                 수정
               </button>
-              <button
-                onClick={() => void handleWithdraw()}
-                disabled={cancelRequest.isPending}
-                className="rounded-md border border-red-300 px-3 py-1.5 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-60"
-              >
-                철회
-              </button>
+              {canWithdraw && (
+                <button
+                  onClick={() => void handleWithdraw()}
+                  disabled={cancelRequest.isPending}
+                  className="rounded-md border border-red-300 px-3 py-1.5 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-60"
+                >
+                  철회
+                </button>
+              )}
             </>
           )}
           {canRework && (
@@ -421,7 +560,7 @@ export function RequestDetail() {
               maxLength={200}
             />
           </div>
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
               <label className="block text-sm font-medium text-gray-700">긴급도</label>
               <select
@@ -432,20 +571,6 @@ export function RequestDetail() {
                 {URGENCY_OPTIONS.map((u) => (
                   <option key={u} value={u}>
                     {u}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700">공개범위</label>
-              <select
-                className={fieldCls}
-                value={editVisibility}
-                onChange={(e) => setEditVisibility(e.target.value as RequestVisibility)}
-              >
-                {VISIBILITY_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
                   </option>
                 ))}
               </select>
@@ -537,10 +662,10 @@ export function RequestDetail() {
       )}
 
       {/* 검수 패널 (검수대기 상태에서만 렌더) */}
-      <InspectionPanel request={v} requestId={id} isOwner={isRequester} isSystem={isSystemUser} />
+      <InspectionPanel request={v} requestId={id} isOwner={isRequester} isSystem={canProcessRequest} />
 
       {/* 이의제기 패널 (완료 상태 또는 이의 이력이 있을 때만 렌더) */}
-      <DisputePanel request={v} requestId={id} isOwner={isRequester} isSystem={isSystemUser} />
+      <DisputePanel request={v} requestId={id} isOwner={isRequester} isSystem={canProcessRequest} />
 
       {/* 통합 타임라인 */}
       <div>
@@ -585,6 +710,11 @@ export function RequestDetail() {
                     {item.kind === 'attachment' && (
                       <span className="shrink-0 rounded bg-gray-100 px-1.5 py-0.5 text-xs font-medium text-gray-500">
                         첨부
+                      </span>
+                    )}
+                    {item.kind === 'sharing' && (
+                      <span className="shrink-0 rounded bg-purple-100 px-1.5 py-0.5 text-xs font-medium text-purple-700">
+                        공유변경
                       </span>
                     )}
 
@@ -634,6 +764,23 @@ export function RequestDetail() {
                         )}
                       </span>
                     )}
+                    {item.kind === 'sharing' && (
+                      <span className="min-w-0 flex-1 truncate text-gray-700">
+                        {[
+                          item.fromVisibility && item.toVisibility
+                            ? `공개범위 ${visibilityLabel(item.fromVisibility)} → ${visibilityLabel(item.toVisibility)}`
+                            : null,
+                          item.added?.length
+                            ? `추가: ${item.added.map((t) => targetLabel(t)).join(', ')}`
+                            : null,
+                          item.removed?.length
+                            ? `제거: ${item.removed.map((t) => targetLabel(t)).join(', ')}`
+                            : null,
+                        ]
+                          .filter(Boolean)
+                          .join(' · ')}
+                      </span>
+                    )}
 
                     {/* 작성자·시각 */}
                     <span className="shrink-0 text-xs font-medium text-gray-600">
@@ -671,8 +818,8 @@ export function RequestDetail() {
             variant="public"
             onSubmit={(body, files) => submitComment(body, files, false)}
           />
-          {/* 아래: 내부 메모 (시스템팀 전용 · 코드 입력용) */}
-          {isSystemUser && (
+          {/* 아래: 내부 메모 (내부메모 열람 능력 보유자 전용 · 코드 입력용) */}
+          {canViewInternal && (
             <CommentComposer
               variant="internal"
               onSubmit={(body, files) => submitComment(body, files, true)}

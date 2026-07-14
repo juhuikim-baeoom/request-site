@@ -7,6 +7,28 @@ import type {
   RequestTypeCode,
 } from '../types/database'
 
+// 역할 한국어 라벨 — 계정 관리·상단 메뉴가 공유한다.
+// 내부값은 서버 user_role enum과 동일해야 한다.
+export const ROLE_LABEL: Record<string, string> = {
+  staff: '요청자',
+  dept_monitor: '부서 모니터링 관리자',
+  org_monitor: '기관 모니터링 관리자',
+  system: '시스템팀 담당자',
+  exec: '경영진',
+  system_admin: '시스템팀 관리자',
+  viewer: '(폐기) 뷰어',
+}
+
+// 계정 관리 역할 select에 노출할 역할 (폐기값 viewer 제외)
+export const ASSIGNABLE_ROLES = [
+  'staff',
+  'dept_monitor',
+  'org_monitor',
+  'system',
+  'exec',
+  'system_admin',
+] as const
+
 // 기관 (request_org enum)
 export const ORG_OPTIONS: RequestOrg[] = ['배움', '배론', '허브', '공통']
 
@@ -24,11 +46,14 @@ export const STATUS_OPTIONS: RequestStatus[] = [
   '철회',
 ]
 
-// 관리 보드 칸반 컬럼 — 철회는 아카이브성이므로 보드에서 제외
+// 요청 처리 화면의 칸반 컬럼 — 검수대기 포함, 철회는 아카이브성이므로 제외
 export const BOARD_STATUSES: RequestStatus[] = ['접수', '진행중', '검수대기', '보류', '완료', '반려']
 
 // 열린(진행 중인) 상태 — 검수대기도 아직 종결이 아니므로 포함
 export const OPEN_STATUSES: RequestStatus[] = ['접수', '진행중', '검수대기', '보류']
+
+// 종결 상태 — server/src/services/impact.ts의 CLOSED와 동일 (영향도 소급 변경 금지 기준)
+export const CLOSED_STATUSES: RequestStatus[] = ['완료', '반려', '철회']
 
 // 상태별 뱃지 색상 (진한 배경 + 흰 글자로 한눈에 구분)
 export const STATUS_BADGE: Record<RequestStatus, string> = {
@@ -135,6 +160,22 @@ export const VISIBILITY_SHORT: Record<RequestVisibility, string> = {
 export type Urgency = '높음' | '보통' | '낮음'
 export const URGENCY_OPTIONS: Urgency[] = ['높음', '보통', '낮음']
 
+/**
+ * 우선순위 격자 — 서버 server/src/sla.ts의 derivePriority와 동일해야 한다.
+ * urgency(긴급도) × impact(영향도) 격자로 우선순위(P1~P4)를 산정한다 (곱셈 아님).
+ * 클라이언트에서 배정 전 미리보기(예상 우선순위) 용도로만 쓴다 — 실제 값은 서버가 확정한다.
+ */
+export function derivePriorityPreview(urgency: Urgency, impact: Urgency): PriorityLevel {
+  if (impact === '높음' && urgency === '높음') return 'P1'
+  if (impact === '높음' && urgency === '보통') return 'P2'
+  if (impact === '높음' && urgency === '낮음') return 'P3'
+  if (impact === '보통' && urgency === '높음') return 'P2'
+  if (impact === '보통' && urgency === '보통') return 'P3'
+  if (impact === '보통' && urgency === '낮음') return 'P4'
+  if (impact === '낮음' && urgency === '높음') return 'P3'
+  return 'P4'
+}
+
 // 타입별 intake_detail 필드 정의 (서버 계약과 키 정확히 일치)
 export interface IntakeField {
   key: string
@@ -181,6 +222,9 @@ export const TYPE_HINTS: Record<RequestTypeCode, string> = {
 }
 
 // 추가 공유 — 직무 단위(target_type='function') 선택 항목 (큐레이션된 6종)
+// server/src/http.ts의 FUNCTION_TARGETS 사본과 동일해야 한다(클라이언트는 서버 코드를
+// import할 수 없어 사본을 둔다). 한쪽만 고치면 접수 폼이 서버가 거부하는 값을 렌더하거나
+// 서버가 허용하는 값을 숨기게 되니 두 사본을 함께 바꾼다.
 export const FUNCTION_TARGETS: string[] = [
   '교학팀',
   '상담영업팀',
@@ -190,15 +234,59 @@ export const FUNCTION_TARGETS: string[] = [
   '시스템팀',
 ]
 
-// 추가 공유 — 세부부서(target_type='dept') 값/라벨 규칙
-//   value: '배움|교학팀' (RLS 매칭용), label: '배움_교학팀' (표시용)
+// 추가 공유 — 세부부서(target_type='dept')의 전송값 규칙: '배움|교학팀' (열람 판정 매칭용)
 export function deptTargetValue(org: RequestOrg | string, fn: string): string {
   return `${org}|${fn}`
-}
-export function deptTargetLabel(org: RequestOrg | string, fn: string): string {
-  return `${org}_${fn}`
 }
 export function parseDeptTargetValue(value: string): { org: string; fn: string } {
   const [org, fn] = value.split('|')
   return { org: org ?? '', fn: fn ?? '' }
+}
+
+/**
+ * 공유대상 표시 라벨 — 뱃지·타임라인·선택 피커가 모두 이 함수를 쓴다.
+ * 규칙이 세 곳에 흩어져 있어 같은 대상이 화면마다 다르게 보이던 문제를 없앤다.
+ *   직무 단위: '교학팀 전체'
+ *   세부부서:  '배움 › 교학팀'  (전송값 '배움|교학팀')
+ * 후보 목록에 없는 값(조직도에서 빠진 팀 등)도 전송값에서 라벨을 만들어 항상 표시한다.
+ */
+export function sharedTargetLabel(t: { target_type: string; target_value: string }): string {
+  if (t.target_type === 'dept') {
+    const { org, fn } = parseDeptTargetValue(t.target_value)
+    return org && fn ? `${org} › ${fn}` : t.target_value
+  }
+  return `${t.target_value} 전체`
+}
+
+/** 담당자 select 후보 항목 (원 후보 목록 밖에서 편입된 경우 outsideCandidates=true) */
+export interface AssigneeOption {
+  id: string
+  name: string | null
+  email: string
+  outsideCandidates: boolean
+}
+
+/**
+ * 담당자 select 후보 목록 — 담당자 후보(보통 role='system')에 현재 담당자가 없어도
+ * 그 담당자를 옵션으로 편입해 select value가 항상 실제 담당자와 일치하도록 한다.
+ * ManageBoard.tsx의 인라인 select와 AdminPanel.tsx가 같은 규칙을 쓴다.
+ */
+export function withCurrentAssignee<T extends { id: string; name: string | null; email: string }>(
+  candidates: T[],
+  currentAssigneeId: string | null | undefined,
+  allPeople: T[],
+): AssigneeOption[] {
+  const options: AssigneeOption[] = candidates.map((c) => ({
+    id: c.id,
+    name: c.name,
+    email: c.email,
+    outsideCandidates: false,
+  }))
+  if (currentAssigneeId && !candidates.some((c) => c.id === currentAssigneeId)) {
+    const found = allPeople.find((p) => p.id === currentAssigneeId)
+    if (found) {
+      options.push({ id: found.id, name: found.name, email: found.email, outsideCandidates: true })
+    }
+  }
+  return options
 }

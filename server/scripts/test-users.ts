@@ -5,6 +5,8 @@
  * - system PATCH /api/users/:id 200
  * - system PATCH 잘못된 role → 400
  * - POST /api/org-directory/import upsert 검증
+ * - 대문자 UUID로 PATCH해도 200 (마지막 관리자 가드의 대소문자 비교 회귀 방지)
+ * - 폐기값 viewer 사용자를 정상 역할로 구제(role 변경) 가능
  */
 import assert from 'node:assert/strict'
 import { randomBytes } from 'node:crypto'
@@ -74,11 +76,11 @@ const staffCookies = { sid: staffSid }
     method: 'PATCH',
     url: `/api/users/${staffUser.id}`,
     cookies: sysCookies,
-    payload: { role: 'viewer', dept: '테스트팀', org_affil: '배론', dept_function: '운영팀' },
+    payload: { role: 'dept_monitor', dept: '테스트팀', org_affil: '배론', dept_function: '운영팀' },
   })
   assert.equal(res.statusCode, 200, `PATCH 200, got ${res.statusCode}: ${res.body}`)
   const updated = res.json()
-  assert.equal(updated.role, 'viewer', 'role 변경 확인')
+  assert.equal(updated.role, 'dept_monitor', 'role 변경 확인')
   assert.equal(updated.dept, '테스트팀', 'dept 변경 확인')
   assert.equal(updated.org_affil, '배론', 'org_affil 변경 확인')
   assert.equal(updated.dept_function, '운영팀', 'dept_function 변경 확인')
@@ -158,7 +160,7 @@ await db.execute(sql`delete from org_directory where email in (${importEmail1}, 
     cookies: sysCookies,
     payload: {
       rows: [
-        { email: importEmail1, name: '임포트1수정', dept: '기획팀수정', org_affil: '배론', role: 'viewer' },
+        { email: importEmail1, name: '임포트1수정', dept: '기획팀수정', org_affil: '배론', role: 'org_monitor' },
       ],
     },
   })
@@ -172,7 +174,7 @@ await db.execute(sql`delete from org_directory where email in (${importEmail1}, 
   `)
   assert.equal(rows.rows[0]?.name, '임포트1수정', '이름 업데이트 확인')
   assert.equal(rows.rows[0]?.org_affil, '배론', 'org_affil 업데이트 확인')
-  assert.equal(rows.rows[0]?.role, 'viewer', 'role 업데이트 확인')
+  assert.equal(rows.rows[0]?.role, 'org_monitor', 'role 업데이트 확인')
   console.log('(7) org-directory import upsert 업데이트 OK')
 }
 
@@ -189,6 +191,60 @@ await db.execute(sql`delete from org_directory where email in (${importEmail1}, 
   assert.equal(res.statusCode, 403, `staff import 403, got ${res.statusCode}`)
   console.log('(8) staff POST /api/org-directory/import 403 OK')
 }
+
+// ──────────────────────────────────────────
+// (9) 대문자 UUID로 PATCH해도 정상 동작해야 함
+//     회귀: 마지막 관리자 강등 방지 가드가 잠긴 행을 JS 문자열 비교(r.id === id)로 찾는데,
+//     SQL은 대소문자 무관하게 매칭하지만 Postgres가 반환하는 id는 소문자 정규형이라
+//     URL 원문이 대문자면 매칭에 실패해 잠겼는데도 404가 났다.
+// ──────────────────────────────────────────
+const [upperCaseTestUser] = await db.insert(users).values({
+  email: 'uppercase-uuid-test@baeoom.com',
+  name: '대문자UUID테스트',
+  orgAffil: '배움',
+  deptFunction: '교학팀',
+  role: 'staff',
+}).returning()
+
+{
+  const res = await app.inject({
+    method: 'PATCH',
+    url: `/api/users/${upperCaseTestUser.id.toUpperCase()}`,
+    cookies: sysCookies,
+    payload: { dept: '대문자테스트팀' },
+  })
+  assert.equal(res.statusCode, 200, `대문자 UUID PATCH도 200이어야 함(404 회귀 확인), got ${res.statusCode}: ${res.body}`)
+  assert.equal(res.json().dept, '대문자테스트팀', 'dept 변경 확인')
+  console.log('(9) 대문자 UUID PATCH 200 OK (404 회귀 없음)')
+}
+
+await db.delete(users).where(eq(users.id, upperCaseTestUser.id))
+
+// ──────────────────────────────────────────
+// (10) 폐기값 viewer 사용자를 정상 역할로 구제(role 변경) 가능해야 함
+//      계정 관리 화면의 존재 이유 — viewer로 남은 기존 행이 영영 고정되면 안 된다.
+// ──────────────────────────────────────────
+const [viewerTestUser] = await db.insert(users).values({
+  email: 'viewer-rescue-test@baeoom.com',
+  name: '뷰어구제테스트',
+  orgAffil: '배움',
+  deptFunction: '교학팀',
+  role: 'viewer',
+}).returning()
+
+{
+  const res = await app.inject({
+    method: 'PATCH',
+    url: `/api/users/${viewerTestUser.id}`,
+    cookies: sysCookies,
+    payload: { role: 'staff' },
+  })
+  assert.equal(res.statusCode, 200, `viewer → staff 구제 PATCH는 200이어야 함, got ${res.statusCode}: ${res.body}`)
+  assert.equal(res.json().role, 'staff', 'role이 staff로 바뀌어야 함')
+  console.log('(10) 폐기값 viewer 사용자 역할 구제(viewer→staff) OK')
+}
+
+await db.delete(users).where(eq(users.id, viewerTestUser.id))
 
 // ──────────────────────────────────────────
 // 정리

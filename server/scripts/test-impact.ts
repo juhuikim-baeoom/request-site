@@ -1,0 +1,221 @@
+/**
+ * 영향도 재조정 서비스 테스트
+ * - 재산정: priority_level·resolution_due_at 갱신, assigned_at·first_response_at 보존
+ * - 미배정 건 거부 (NOT_ASSIGNED)
+ * - 종결 건 거부 (CLOSED)
+ * - 담당자(≠행위자)에게 알림 발송
+ */
+import assert from 'node:assert/strict'
+import { randomBytes } from 'node:crypto'
+import { buildApp } from '../src/app.js'
+import { db, pool } from '../src/db/client.js'
+import { users, requests } from '../src/db/schema.js'
+import { eq, sql } from 'drizzle-orm'
+import { loginAsDev } from '../src/routes/helpers.js'
+import { assignRequest } from '../src/services/assign.js'
+import { changeStatus } from '../src/services/transition.js'
+import { changeImpact, ImpactError } from '../src/services/impact.js'
+
+/** 비동기 알림 INSERT가 완료될 때까지 짧게 대기 */
+function tick(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 50))
+}
+
+const app = await buildApp()
+await loginAsDev(app)
+
+const juhui = await db.query.users.findFirst({ where: eq(users.email, 'juhuikim@baeoom.com') })
+const actorId = juhui!.id
+
+/** urgency='보통' 인 테스트 요청 (보통×보통 = P3, 보통×높음 = P2) */
+async function makeRequest() {
+  const [row] = await db.insert(requests).values({
+    org: '공통', typeCode: 'error', title: '영향도테스트',
+    requesterId: actorId, visibility: 'dept', urgency: '보통',
+  }).returning()
+  return row
+}
+
+// ──────────────────────────────────────────
+// (1) 재산정: 보통 → 높음 이면 P3 → P2, 배정 시각은 보존
+// ──────────────────────────────────────────
+{
+  const req = await makeRequest()
+  await assignRequest({ reqId: req.id, assigneeId: actorId, impact: '보통', actorId })
+  const before = await db.execute<any>(sql`
+    select priority_level, assigned_at, first_response_at, resolution_due_at
+    from requests where id = ${req.id}
+  `)
+  const b = before.rows[0]
+  assert.equal(b.priority_level, 'P3', '보통×보통 = P3')
+
+  const res = await changeImpact({ reqId: req.id, impact: '높음', actorId })
+  assert.equal(res.priorityLevel, 'P2', '보통×높음 = P2 반환')
+
+  const after = await db.execute<any>(sql`
+    select impact, priority_level, assigned_at, first_response_at, resolution_due_at, sla_policy_id, status
+    from requests where id = ${req.id}
+  `)
+  const a = after.rows[0]
+  assert.equal(a.impact, '높음', 'impact 갱신')
+  assert.equal(a.priority_level, 'P2', 'priority_level 재산정')
+  assert.equal(a.status, '진행중', 'status 불변')
+  assert.equal(String(a.assigned_at), String(b.assigned_at), 'assigned_at 보존')
+  assert.equal(String(a.first_response_at), String(b.first_response_at), 'first_response_at 보존')
+  assert.notEqual(String(a.resolution_due_at), String(b.resolution_due_at), 'resolution_due_at 재산정')
+  assert.ok(a.sla_policy_id, 'sla_policy_id 세팅')
+  console.log('(1) 재산정 + 배정 시각 보존 OK')
+  await db.delete(requests).where(eq(requests.id, req.id))
+}
+
+// ──────────────────────────────────────────
+// (2) 미배정 건 거부
+// ──────────────────────────────────────────
+{
+  const req = await makeRequest()
+  let threw = false
+  try {
+    await changeImpact({ reqId: req.id, impact: '높음', actorId })
+  } catch (e: any) {
+    assert.ok(e instanceof ImpactError, 'ImpactError여야 함')
+    assert.equal(e.code, 'NOT_ASSIGNED')
+    threw = true
+  }
+  assert.ok(threw, '예외가 발생해야 함')
+  console.log('(2) 미배정 건 거부 OK')
+  await db.delete(requests).where(eq(requests.id, req.id))
+}
+
+// ──────────────────────────────────────────
+// (3) 종결 건 거부 (완료) — 배정된 건
+// ──────────────────────────────────────────
+{
+  const req = await makeRequest()
+  await assignRequest({ reqId: req.id, assigneeId: actorId, impact: '보통', actorId })
+  await changeStatus({ reqId: req.id, to: '완료', actorId })
+  let threw = false
+  try {
+    await changeImpact({ reqId: req.id, impact: '높음', actorId })
+  } catch (e: any) {
+    assert.equal(e.code, 'CLOSED')
+    threw = true
+  }
+  assert.ok(threw, '예외가 발생해야 함')
+  console.log('(3) 종결 건 거부 OK')
+  await db.delete(requests).where(eq(requests.id, req.id))
+}
+
+// ──────────────────────────────────────────
+// (3b) 미배정 + 종결 건 → CLOSED (NOT_ASSIGNED 아님)
+// 접수 → 반려로 직행한 미배정 건: assignee_id도 null, status도 종결.
+// CLOSED 검사가 NOT_ASSIGNED보다 먼저 실행되어야 실제 원인(배정 불가한 종결 상태)을 알려준다.
+// ──────────────────────────────────────────
+{
+  const req = await makeRequest()
+  await changeStatus({ reqId: req.id, to: '반려', actorId })
+  const cur = await db.execute<any>(sql`select assignee_id, status from requests where id = ${req.id}`)
+  assert.equal(cur.rows[0].assignee_id, null, '미배정 상태 유지')
+  assert.equal(cur.rows[0].status, '반려', '반려로 직행')
+
+  let threw = false
+  try {
+    await changeImpact({ reqId: req.id, impact: '높음', actorId })
+  } catch (e: any) {
+    assert.ok(e instanceof ImpactError, 'ImpactError여야 함')
+    assert.equal(e.code, 'CLOSED', 'NOT_ASSIGNED가 아니라 CLOSED여야 함')
+    threw = true
+  }
+  assert.ok(threw, '예외가 발생해야 함')
+  console.log('(3b) 미배정 + 종결 건 → CLOSED OK')
+  await db.delete(requests).where(eq(requests.id, req.id))
+}
+
+// ──────────────────────────────────────────
+// (4) 담당자(≠행위자)에게 영향도 변경 알림 발송
+// ──────────────────────────────────────────
+{
+  // 행위자(actorId)와 다른 사용자를 담당자로 배정 — assignee_id !== actorId 분기 검증
+  const [otherUser] = await db.insert(users).values({
+    email: `impact-other-${randomBytes(4).toString('hex')}@baeoom.com`,
+    name: '영향도알림테스트대상',
+    orgAffil: '배움',
+    deptFunction: '교학팀',
+    role: 'staff',
+  }).returning()
+
+  const req = await makeRequest()
+  await assignRequest({ reqId: req.id, assigneeId: otherUser.id, impact: '보통', actorId })
+  await db.execute(sql`delete from notifications where user_id = ${otherUser.id}`)
+
+  await changeImpact({ reqId: req.id, impact: '높음', actorId })
+  await tick()
+
+  const notifRows = await db.execute<{ user_id: string; type: string; request_id: number; message: string }>(sql`
+    select user_id, type, request_id, message from notifications where request_id = ${req.id} and type = 'status'
+  `)
+  assert.equal(notifRows.rows.length, 1, '영향도 변경 알림 1개')
+  assert.equal(notifRows.rows[0].user_id, otherUser.id, '담당자에게 알림')
+  assert.ok(notifRows.rows[0].message.includes('P2'), '변경된 priority_level 메시지 포함')
+  console.log('(4) 담당자(≠행위자) 영향도 변경 알림 OK:', notifRows.rows[0].message)
+
+  await db.execute(sql`delete from notifications where user_id = ${otherUser.id}`)
+  await db.delete(requests).where(eq(requests.id, req.id))
+  await db.delete(users).where(eq(users.id, otherUser.id))
+}
+
+// ──────────────────────────────────────────
+// (5) I-2 회귀: 기한 내 응답 완료된 오래된 건 — 영향도 변경 시 sla_response_breached는
+// false로 유지되어야 한다 (firstResponseAt 기준 판정, new Date() 기준 판정 금지).
+// assignRequest는 first_response_at=now()로만 세팅하므로 "2주 전에 이미 기한 내 응답을
+// 마친" 상태는 재현할 수 없다 — raw UPDATE로 그 상태를 직접 시뮬레이션한다.
+// ──────────────────────────────────────────
+{
+  const twoWeeksAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000)
+  const onTimeResponse = new Date(twoWeeksAgo.getTime() + 30 * 60 * 1000) // 생성 30분 후 응답(기한 내)
+
+  const [req] = await db.insert(requests).values({
+    org: '공통', typeCode: 'error', title: '오래된건SLA회귀테스트',
+    requesterId: actorId, visibility: 'dept', urgency: '보통',
+    createdAt: twoWeeksAgo,
+  }).returning()
+
+  const p3 = await db.execute<{ id: number }>(sql`select id from sla_policy where priority_level = 'P3'`)
+
+  // 2주 전 배정되어 기한 내(생성 30분 후) 정상 응답 완료된 상태를 직접 세팅
+  await db.execute(sql`
+    update requests
+    set assignee_id = ${actorId}, impact = '보통', priority_level = 'P3',
+        status = '진행중', assigned_at = ${onTimeResponse}, first_response_at = ${onTimeResponse},
+        response_due_at = ${new Date(twoWeeksAgo.getTime() + 8 * 60 * 60 * 1000)},
+        resolution_due_at = ${new Date(twoWeeksAgo.getTime() + 32 * 60 * 60 * 1000)},
+        sla_policy_id = ${p3.rows[0].id},
+        sla_response_breached = false
+    where id = ${req.id}
+  `)
+
+  const before = await db.execute<any>(sql`
+    select sla_response_breached, first_response_at from requests where id = ${req.id}`)
+  assert.equal(before.rows[0].sla_response_breached, false, '사전조건: 기한 내 응답 breached=false')
+
+  // 시스템팀이 영향도만 변경 (보통 → 높음) — priority_level·SLA 기한 재산정 트리거
+  const res = await changeImpact({ reqId: req.id, impact: '높음', actorId })
+  assert.equal(res.priorityLevel, 'P2', '보통×높음 = P2')
+
+  const after = await db.execute<any>(sql`
+    select priority_level, sla_response_breached, first_response_at
+    from requests where id = ${req.id}`)
+  const a = after.rows[0]
+  assert.equal(a.priority_level, 'P2', 'priority_level 재산정')
+  assert.equal(
+    a.sla_response_breached, false,
+    'I-2 회귀: 2주 전 생성·기한 내 응답 완료 건에서 영향도만 바꿔도 sla_response_breached는 false로 유지되어야 함',
+  )
+  assert.equal(String(a.first_response_at), String(before.rows[0].first_response_at), 'first_response_at 보존')
+  console.log('(5) I-2 회귀: 오래된 기한내응답 건 영향도 변경 시 sla_response_breached=false 유지 OK')
+
+  await db.delete(requests).where(eq(requests.id, req.id))
+}
+
+await app.close()
+await pool.end()
+console.log('\ntest:impact ALL PASSED')

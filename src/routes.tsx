@@ -1,6 +1,7 @@
 import { createBrowserRouter, Navigate } from 'react-router-dom'
 import { Layout } from './components/Layout'
 import { RequireRole } from './auth/RequireRole'
+import { canProcess, canSeeDashboard, canManageAccounts } from './lib/permissions'
 import { LoginPage } from './pages/LoginPage'
 import { RequestForm } from './features/requests/RequestForm'
 import { MyRequests } from './features/requests/MyRequests'
@@ -30,29 +31,29 @@ export const router = createBrowserRouter([
       { path: 'requests/mine', element: <MyRequests /> },
       { path: 'requests/:id', element: <RequestDetail /> },
 
-      // system 전용
+      // canProcess: system·system_admin
       {
         path: 'board',
         element: (
-          <RequireRole allow={['system']}>
+          <RequireRole can={canProcess}>
             <ManageBoard />
           </RequireRole>
         ),
       },
-      // system + viewer
+      // canSeeDashboard: system·system_admin·exec
       {
         path: 'dashboard',
         element: (
-          <RequireRole allow={['system', 'viewer']}>
+          <RequireRole can={canSeeDashboard}>
             <Dashboard />
           </RequireRole>
         ),
       },
-      // system 전용
+      // canManageAccounts: system_admin 전용
       {
         path: 'accounts',
         element: (
-          <RequireRole allow={['system']}>
+          <RequireRole can={canManageAccounts}>
             <Accounts />
           </RequireRole>
         ),

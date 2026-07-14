@@ -19,7 +19,7 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* ---- 애니메이션 (관리 보드 등) ---- */
+/* ---- 애니메이션 (요청 처리 화면 등) ---- */
 @keyframes cardPop {
   from { opacity: 0; transform: translateY(10px); }
   to { opacity: 1; transform: none; }

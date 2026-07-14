@@ -595,7 +595,7 @@ export type Database = {
         | '철회'
       request_visibility: 'private' | 'dept' | 'function' | 'org' | 'shared'
       urgency_level: '높음' | '보통' | '낮음'
-      user_role: 'staff' | 'system' | 'viewer'
+      user_role: 'staff' | 'system' | 'viewer' | 'dept_monitor' | 'org_monitor' | 'exec' | 'system_admin'
     }
     CompositeTypes: {
       [_ in never]: never

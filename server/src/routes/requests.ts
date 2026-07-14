@@ -2,11 +2,14 @@ import type { FastifyInstance } from 'fastify'
 import { sql } from 'drizzle-orm'
 import { db, withUser } from '../db/client.js'
 import { authenticate } from '../auth/session.js'
-import { visibilityFilter, isSystem } from '../authz.js'
+import { visibilityFilter, canProcess, canChangeSharing } from '../authz.js'
 import { parseId, isOneOf, ORGS, TYPE_CODES, PRIORITIES, VISIBILITIES } from '../http.js'
 import { changeStatus, TransitionError } from '../services/transition.js'
 import { assignRequest, AssignError } from '../services/assign.js'
-import { urgencyResponseLevel, addBusinessMinutes, type Urgency, type Impact } from '../sla.js'
+import { changeImpact, ImpactError, CLOSED } from '../services/impact.js'
+import { changeSharing, parseSharedTargets, SharingError, type Visibility, type SharedTarget } from '../services/sharing.js'
+import { computeSlaFields, computeResponseDueAtForUrgency, loadHolidaySet } from '../services/sla-fields.js'
+import { type Urgency, type Impact } from '../sla.js'
 import type { CompletionRoute } from '../services/inspection.js'
 
 // intake_detail 필수키 맵
@@ -53,6 +56,23 @@ export async function requestRoutes(app: FastifyInstance) {
       (b.visibility !== undefined && !isOneOf(VISIBILITIES, b.visibility))
     ) { reply.code(400); return { error: 'invalid enum' } }
 
+    // 공유 대상 검증 — PUT /api/requests/:id/sharing과 동일한 헬퍼를 공유한다 (계약 통일).
+    // 요청 행을 만들기 전에 검증해 잘못된 입력으로 반쪽짜리 요청이 생기는 것을 막는다.
+    // shared_targets가 아예 없으면(undefined) 빈 배열로 취급하지만, 값이 있는데 배열이
+    // 아니면(객체·문자열 등 오입력) PUT과 동일하게 400으로 거부한다 — 조용히 무시하고 201을
+    // 내면 클라이언트는 공유가 설정된 줄 착각하게 된다.
+    if (b.shared_targets !== undefined && !Array.isArray(b.shared_targets)) {
+      reply.code(400); return { error: 'invalid shared_targets', code: 'INVALID_SHARED_TARGETS' }
+    }
+    const rawSharedTargets = Array.isArray(b.shared_targets) ? b.shared_targets : []
+    let sharedTargets: SharedTarget[]
+    try {
+      sharedTargets = parseSharedTargets(rawSharedTargets)
+    } catch (e: any) {
+      if (e instanceof SharingError) { reply.code(400); return { error: e.message, code: e.code } }
+      throw e
+    }
+
     // intake_detail 필수키 검증
     const typeCode: string = b.type_code
     const required = INTAKE_REQUIRED[typeCode]
@@ -75,21 +95,15 @@ export async function requestRoutes(app: FastifyInstance) {
       }
     }
 
-    // urgency 기반 response_due_at 계산
+    // urgency 기반 response_due_at 계산 (미배정 긴급도 편집 재산정 분기와 동일 함수 공유)
     const urgency: Urgency = isOneOf(PRIORITIES, b.urgency) ? b.urgency : '보통'
-    const respLevel = urgencyResponseLevel(urgency)
-
-    const holidayRows = await db.execute<{ holiday_on: string }>(sql`select holiday_on from holidays`)
-    const holidaySet = new Set(holidayRows.rows.map((h: any) => h.holiday_on))
-
-    const policyRes = await db.execute<{ response_minutes: number }>(
-      sql`select response_minutes from sla_policy where priority_level = ${respLevel}`,
-    )
-    const respMin = policyRes.rows[0]?.response_minutes ?? null
-
-    const responseDueAt = respMin != null
-      ? addBusinessMinutes(new Date(), respMin, holidaySet)
-      : null
+    const holidaySet = await loadHolidaySet()
+    const responseDueAt = await computeResponseDueAtForUrgency({
+      tx: db,
+      urgency,
+      from: new Date(),
+      holidaySet,
+    })
 
     const created = await withUser(u.id, async (tx) => {
       const ins = await tx.execute<any>(sql`
@@ -102,8 +116,7 @@ export async function requestRoutes(app: FastifyInstance) {
         )
         returning *`)
       const row = ins.rows[0]
-      const targets = Array.isArray(b.sharedTargets) ? b.sharedTargets : []
-      for (const t of targets) {
+      for (const t of sharedTargets) {
         await tx.execute(sql`
           insert into request_shared_targets (request_id, target_type, target_value)
           values (${row.id}, ${t.target_type}, ${t.target_value})
@@ -127,22 +140,28 @@ export async function requestRoutes(app: FastifyInstance) {
 
     // 수정 대상 enum 값 검증 (status가 있으면 changeStatus에서 검증하므로 여기서는 기본 형식만)
     if (
-      (b.urgency !== undefined && !isOneOf(PRIORITIES, b.urgency)) ||
-      (b.visibility !== undefined && !isOneOf(VISIBILITIES, b.visibility))
+      (b.urgency !== undefined && !isOneOf(PRIORITIES, b.urgency))
     ) { reply.code(400); return { error: 'invalid enum' } }
+
+    // visibility는 PUT /api/requests/:id/sharing 에서만 바꾼다 (권한 규칙이 다르다)
+    if (b.visibility !== undefined) {
+      reply.code(400)
+      return { error: 'visibility는 PUT /api/requests/:id/sharing 으로 변경하세요', code: 'USE_SHARING_ENDPOINT' }
+    }
 
     const cur = await db.execute<any>(sql`select requester_id, status from requests where id = ${id}`)
     const row = cur.rows[0]
     if (!row) { reply.code(404); return { error: 'not found' } }
 
     const isOwner = row.requester_id === u.id
-    const sys = isSystem(u)
+    const sys = canProcess(u)
 
     // 상태 변경은 changeStatus()를 통해서만
     if (b.status !== undefined) {
-      // status 변경과 내용 편집을 한 번에 허용하지 않아 stale-status 우회 방지.
+      // status 변경과 내용 편집을 한 번에 허용하지 않아 stale-status 우회 방지 (issues 2, 4, 5, 6).
       // 단 검수 승인(검수대기 → 완료)만은 CSAT를 함께 저장해야 하므로 예외로 둔다.
-      const otherFields = ['title', 'body', 'urgency', 'visibility', 'desired_due', 'assignee_id']
+      // visibility는 별도 sharing 엔드포인트에서 처리하므로 여기 목록에서 제외한다.
+      const otherFields = ['title', 'body', 'urgency', 'desired_due', 'assignee_id']
       if (otherFields.some((k) => b[k] !== undefined)) {
         reply.code(400); return { error: 'status change and field edit must not be combined in one request' }
       }
@@ -209,14 +228,71 @@ export async function requestRoutes(app: FastifyInstance) {
 
     // 내용 수정 — 시스템팀 또는 (본인 且 접수)
     // row.status는 status 변경이 없는 경우에만 이 분기에 도달하므로 stale 문제 없음
-    const wantsEdit = ['title', 'body', 'urgency', 'visibility', 'desired_due'].some((k) => b[k] !== undefined)
+    const wantsEdit = ['title', 'body', 'urgency', 'desired_due'].some((k) => b[k] !== undefined)
     if (wantsEdit && !sys && !(isOwner && row.status === '접수')) { reply.code(403); return { error: 'forbidden' } }
 
     const sets: any[] = []
-    for (const k of ['title', 'body', 'urgency', 'visibility', 'desired_due', 'assignee_id']) {
+    for (const k of ['title', 'body', 'urgency', 'desired_due', 'assignee_id']) {
       if (b[k] !== undefined) sets.push(sql`${sql.raw(k)} = ${b[k]}`)
     }
     if (!sets.length) { reply.code(400); return { error: 'no fields' } }
+
+    // 긴급도 편집은 priority_level = derivePriority(urgency, impact)를 어긋나게 만들 수 있다.
+    // urgency가 실제로 바뀌고 종결 상태가 아니면:
+    //  - impact가 있으면(=배정된 건): 공용 computeSlaFields로 priority_level·SLA 기한 전체를
+    //    재산정한다 (assigned_at·first_response_at·status는 보존).
+    //  - impact가 없으면(=미배정 건, 요청자가 편집 가능한 유일한 창): 요청 생성부와 동일한
+    //    computeResponseDueAtForUrgency로 response_due_at만 재산정한다. priority_level 등은
+    //    아직 impact가 없어 정할 수 없으므로 건드리지 않는다.
+    // TOCTOU 방지: SELECT … FOR UPDATE와 재산정 UPDATE를 같은 트랜잭션에서 수행한다 (assign.ts/impact.ts와 동일 관례).
+    if (b.urgency !== undefined) {
+      const holidaySet = await loadHolidaySet()
+      await withUser(u.id, async (tx) => {
+        const cur2 = await tx.execute<{
+          urgency: Urgency
+          impact: Impact | null
+          status: string
+          created_at: string
+          first_response_at: string | null
+        }>(sql`select urgency, impact, status, created_at, first_response_at from requests where id = ${id} for update`)
+        const r2 = cur2.rows[0]
+        if (r2 && !CLOSED.includes(r2.status) && b.urgency !== r2.urgency) {
+          if (r2.impact != null) {
+            // assign.ts는 assignee_id·first_response_at을 함께 세팅하지만, 인라인 담당자 지정
+            // (PATCH /api/requests/:id { assignee_id })은 assignee_id만 UPDATE하고 first_response_at은
+            // 건드리지 않는다 — 그 경로를 거치면 impact != null && first_response_at = null인 행이
+            // 실제로 생긴다. 이 널가드는 그 경로에서 실제로 도달한다: null이면 아직 미응답 건으로 보고
+            // 현재 시각을 기준으로 breach를 판정한다(대시보드 응답 SLA 준수율 정의와 일치).
+            const firstResponseAt = r2.first_response_at != null ? new Date(r2.first_response_at) : null
+            const sla = await computeSlaFields({
+              tx,
+              urgency: b.urgency as Urgency,
+              impact: r2.impact,
+              createdAt: r2.created_at,
+              holidaySet,
+              firstResponseAt,
+            })
+            sets.push(
+              sql`priority_level = ${sla.priorityLevel}`,
+              sql`response_due_at = ${sla.responseDueAt}`,
+              sql`resolution_due_at = ${sla.resolutionDueAt}`,
+              sql`sla_policy_id = ${sla.slaPolicyId}`,
+              sql`sla_response_breached = ${sla.responseBreached}`,
+            )
+          } else {
+            const responseDueAt = await computeResponseDueAtForUrgency({
+              tx,
+              urgency: b.urgency as Urgency,
+              from: new Date(r2.created_at),
+              holidaySet,
+            })
+            sets.push(sql`response_due_at = ${responseDueAt}`)
+          }
+        }
+        await tx.execute(sql`update requests set ${sql.join(sets, sql`, `)} where id = ${id}`)
+      })
+      reply.code(200); return { ok: true }
+    }
 
     await withUser(u.id, (tx) =>
       tx.execute(sql`update requests set ${sql.join(sets, sql`, `)} where id = ${id}`))
@@ -226,7 +302,7 @@ export async function requestRoutes(app: FastifyInstance) {
   // 미배정 건 배정 (system 전용)
   app.post<{ Params: { id: string }; Body: any }>('/api/requests/:id/assign', async (request, reply) => {
     const u = request.currentUser!
-    if (!isSystem(u)) { reply.code(403); return { error: 'forbidden' } }
+    if (!canProcess(u)) { reply.code(403); return { error: 'forbidden' } }
 
     const id = parseId(request.params.id)
     if (id === null) { reply.code(404); return { error: 'not found' } }
@@ -248,4 +324,88 @@ export async function requestRoutes(app: FastifyInstance) {
 
     reply.code(200); return { ok: true }
   })
+
+  // 영향도 재조정 — 시스템팀 전용. priority_level·SLA 기한 재산정.
+  app.patch<{ Params: { id: string }; Body: { impact?: string } }>(
+    '/api/requests/:id/impact',
+    async (request, reply) => {
+      const u = request.currentUser!
+      if (!canProcess(u)) { reply.code(403); return { error: 'forbidden' } }
+
+      const id = parseId(request.params.id)
+      if (id === null) { reply.code(404); return { error: 'not found' } }
+
+      const b = request.body ?? {}
+      if (!isOneOf(PRIORITIES, b.impact as string)) {
+        reply.code(400); return { error: 'impact(높음|보통|낮음) required' }
+      }
+
+      try {
+        const { priorityLevel } = await changeImpact({
+          reqId: id,
+          impact: b.impact as Impact,
+          actorId: u.id,
+        })
+        reply.code(200); return { ok: true, priority_level: priorityLevel }
+      } catch (e: any) {
+        if (e instanceof ImpactError) {
+          if (e.code === 'NOT_FOUND') { reply.code(404); return { error: 'not found' } }
+          reply.code(400); return { error: e.message, code: e.code }
+        }
+        throw e
+      }
+    },
+  )
+
+  // 공유 설정 변경 — 시스템팀 또는 요청자 본인(상태 무관, 종결 후에도).
+  // 공개범위와 공유 대상을 한 번에 전체 교체한다.
+  app.put<{ Params: { id: string }; Body: { visibility?: string; shared_targets?: unknown } }>(
+    '/api/requests/:id/sharing',
+    async (request, reply) => {
+      const u = request.currentUser!
+      const id = parseId(request.params.id)
+      if (id == null) { reply.code(404); return { error: 'not found' } }
+
+      const b = request.body ?? {}
+      if (!isOneOf(VISIBILITIES, b.visibility as string)) {
+        reply.code(400); return { error: 'invalid visibility' }
+      }
+      const rawTargets = Array.isArray(b.shared_targets) ? b.shared_targets : null
+      if (rawTargets == null) {
+        reply.code(400); return { error: 'shared_targets required', code: 'INVALID_SHARED_TARGETS' }
+      }
+      let targets: SharedTarget[]
+      try {
+        targets = parseSharedTargets(rawTargets)
+      } catch (e: any) {
+        if (e instanceof SharingError) { reply.code(400); return { error: e.message, code: e.code } }
+        throw e
+      }
+
+      // 권한 판정에 요청자 id가 필요하다
+      const cur = await db.execute<{ requester_id: string | null }>(
+        sql`select requester_id from requests where id = ${id}`,
+      )
+      const row = cur.rows[0]
+      if (!row) { reply.code(404); return { error: 'not found' } }
+      if (!canChangeSharing(u, row.requester_id)) { reply.code(403); return { error: 'forbidden' } }
+
+      try {
+        await changeSharing({
+          reqId: id,
+          visibility: b.visibility as Visibility,
+          targets,
+          actorId: u.id,
+        })
+      } catch (e: any) {
+        if (e instanceof SharingError) {
+          if (e.code === 'NOT_FOUND') { reply.code(404); return { error: 'not found' } }
+          reply.code(400); return { error: e.message, code: e.code }
+        }
+        throw e
+      }
+
+      reply.code(200); return { ok: true }
+    },
+  )
 }

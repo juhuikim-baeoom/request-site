@@ -49,7 +49,7 @@ export async function raiseDispute({
   }
 
   // 시스템팀 전원에게 알림 (best-effort)
-  const sysUsers = await db.execute<{ id: string }>(sql`select id from users where role = 'system'`)
+  const sysUsers = await db.execute<{ id: string }>(sql`select id from users where role in ('system', 'system_admin')`)
   const seq = row.seq ?? String(reqId)
   for (const s of sysUsers.rows) {
     void notify(s.id, 'dispute', reqId, `요청 ${seq}에 이의가 제기되었습니다`)
