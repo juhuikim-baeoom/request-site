@@ -5,6 +5,12 @@
 ## [Unreleased]
 
 ### Changed
+- **공유대상 선택 UI — 체크박스 17개 → 검색 + 칩** (`src/features/requests/SharingTargetPicker.tsx` 신규, `SharingEditor.tsx`): 340px 사이드바에 체크박스 17개(직무 6 + 세부부서 11)를 격자로 펼치다 보니 줄바꿈이 제멋대로 나고 `배움_교학팀` 같은 밑줄 라벨이 반복돼 읽기 어려웠다. 더 근본적으로는 **구조가 사용 빈도와 거꾸로**였다 — 공개범위 select가 흔한 경우를 이미 덮으므로 공유대상은 예외용이고 실제 선택은 대부분 0개인데, 거의 쓰지 않는 선택지 17개를 항상 펼쳐두고 있었다.
+  - 기본 상태는 입력칸 한 줄("+ 공유대상 추가" 접힘 토글 제거). 타이핑하면 후보가 좁혀지고, 고른 것만 칩으로 남는다. 이미 고른 항목은 후보에서 빠진다.
+  - 표기를 정리했다: 직무는 "○○팀 전체", 세부부서는 "기관 › 팀"(예: `배론 › 상담영업팀`). **공유대상 피커에서는** 밑줄 표기(`배움_교학팀`)를 쓰지 않는다(`deptTargetLabel`은 요청 상세 뱃지 등 다른 화면에서 여전히 밑줄 표기로 쓰인다).
+  - 키보드 지원(↑↓·Enter·Esc·빈 입력칸에서 Backspace) + WAI-ARIA combobox/listbox 패턴. 선택 결과는 `aria-live`로 알린다.
+  - 공유대상 선택을 `SharingTargetPicker`로 분리했다. `SharingEditor`의 props는 불변이라 호출부(접수 폼·요청 상세)는 바뀌지 않는다.
+  - **데이터·API·권한은 불변**이다. 서버로 보내는 값(`target_type`·`target_value`)과 화이트리스트 검증은 그대로다.
 - **화면 명칭 정리 — "내 요청" 3중 중복 제거** (`src/components/TopNav.tsx`, `src/features/requests/MyRequests.tsx`, `RequestDetail.tsx`, `RequestForm.tsx`): 메뉴 "내 요청" → 페이지 제목 "내 요청 목록" → 탭 "내 요청"으로 같은 단어가 세 겹으로 반복되고, 되돌아가기 링크만 "내 요청 목록"이라 메뉴와 어긋나던 문제를 정리했다.
   - **메뉴·제목은 장소, 탭은 범위**로 역할을 나눴다: 메뉴/제목 "요청 목록", 탭 "나의 요청" / "전체"·"우리 기관"·"우리 부서"·"공유받은 요청"(역할별).
   - 상세 되돌아가기 "← 요청 목록", 접수 완료 화면 "요청 목록 보기".
@@ -27,6 +33,14 @@
   - docs sync: 화면 노출 규칙 불변(내부 리팩토링) — `docs/reference/requirements.md`·`docs/00-overview/index.md` 갱신 스킵.
 
 ### Fixed
+- **병합 직전 최종 리뷰 지적 5건 — 공유대상 검색+칩 브랜치** (`src/features/requests/SharingTargetPicker.tsx`, `CHANGELOG.md`, `docs/superpowers/specs/2026-07-14-sharing-target-picker-design.md`):
+  - **[Important] 후보에 없는 공유대상이 칩으로 안 보이고 해제도 못 하던 유령 공유**: 칩 목록(`selected`)을 후보 목록(`allCandidates`)의 부분집합으로 계산하고 있어, 저장된 값이 후보에 없으면(조직도에서 그 세부부서가 빠졌거나 `useDeptOptions()`가 아직 로딩/실패 중이면) 칩이 아예 렌더되지 않았다. 그런데 부모 Set(`fnTargets`·`deptTargets`)에는 값이 그대로 남아 있어 저장하면 그 공유가 다시 저장됐다 — 화면은 "공유대상 없음"이라고 알리는데(`aria-live`) 실제로는 공유가 살아 있고 UI로 해제할 방법이 없었다. `selected`를 부모 Set 기준으로 다시 계산하도록 수정: 후보 목록에서 라벨을 찾되, 없는 값은 `parseDeptTargetValue()`로 `기관 › 팀` 라벨을 만들어(직무는 `값 전체`) 대체 후보를 만든다. 서버로 보내는 값(`target_value`)은 그대로 두고 라벨만 만들어낸다. 실제 재현으로 확인: 서버 화이트리스트는 통과하지만(`ORGS`·`FUNCTION_TARGETS` 조합) `org_directory`에 없는 조합(`허브|시스템팀`)으로 요청을 만들어 `/api/dept-options` 응답에는 없음을 확인한 뒤, 상세 화면의 "공유 범위 수정" 패널에서 칩이 뜨고 ✕로 해제되는 것을 브라우저로 확인.
+  - **[Important] 키보드로 8번째 이후 후보로 내려가면 활성 항목이 목록 밖으로 나가던 문제**: 목록이 `max-h-56`(약 7개 높이)인데 검색어가 없으면 17개가 뜨고, `activeIndex`만 바뀌고 스크롤은 따라가지 않았다. `activeIndex`·`open`이 바뀔 때 해당 옵션을 `scrollIntoView({ block: 'nearest' })`로 보이게 하는 effect를 추가.
+  - **[Minor] Esc로 목록을 닫아도 입력칸에 검색어가 남으면 Enter가 접수 폼을 제출하던 문제**: `preventDefault()`가 `if (open)` 안에만 있어 검색어가 남은 채 닫힌 상태에서 Enter를 누르면 그대로 새어 나갔다. `query !== ''`일 때도 Enter의 기본 동작을 막도록 분기 추가(단, 활성 후보 선택은 목록이 열려 있을 때만).
+  - **[Minor] 빈 상태 문구가 `listbox`의 잘못된 자식이던 문제**: `role="listbox"` 밑에 `role="option"`이 아닌 `<li>`가 있어 스크린리더가 건너뛸 수 있었다. `role="option"` + `aria-disabled="true"`로 수정(선택 불가이므로 `id`·`onClick` 없음).
+  - **[Minor] `aria-selected` 오용 + 활성 표시가 색만으로 전달되던 문제**: `aria-selected={i === activeIndex}`는 "포커스 중"을 "선택됨"으로 잘못 표현하고 있었다(이 목록은 선택되는 즉시 후보에서 빠지므로 남은 항목은 전부 미선택이 맞다) — 제거했다. 활성 항목 표시에 `border-l-2`(좌측 인디케이터) + `font-medium`을 더해 배경·글자색만이 아닌 비색상 단서를 추가. 칩 `<ul>`에 `aria-label="선택된 공유대상"` 추가.
+  - CHANGELOG의 "밑줄 표기는 쓰지 않는다" 서술을 "공유대상 피커에서는"으로 한정했다(`deptTargetLabel`은 요청 상세 뱃지에서 여전히 밑줄 표기로 쓰인다). 설계 스펙에 "후보 목록에 없는 저장값도 칩으로 표시하고 해제할 수 있다"는 규칙을 추가했다(§1).
+  - 검증: `npx tsc --noEmit` 통과, `test:sharing`(14)·`test:intake`(6)·`test:api`·`db:smoke` 전부 통과. I-1은 코드 확인에 그치지 않고 실제로 재현·검증했다(위 서술 참고).
 - **병합 직전 최종 리뷰 지적 7건 — 공유 설정 사후 수정 브랜치** (`server/src/services/sharing.ts`, `server/src/http.ts`, `server/src/routes/meta.ts`, `server/scripts/test-sharing.ts`, `server/scripts/test-api-list.ts`, `server/scripts/test-api-write.ts`, `src/lib/constants.ts`, `src/features/requests/RequestForm.tsx`, `CHANGELOG.md`):
   - **[Important] `GET /api/dept-options`가 화이트리스트 밖 `dept_function`을 내보내 접수를 깨뜨릴 수 있던 문제**: 접수 폼·공유 수정 패널의 세부부서 체크박스는 이 엔드포인트가 내려주는 옵션으로 렌더되는데, 그 값의 원천인 `org_directory.dept_function`은 조직도 CSV import·계정 관리 `PATCH` 어느 쪽도 검증하지 않는 자유 텍스트다. 화이트리스트(직무 6종) 밖 값(오타·빈 문자열·신규 팀명)이 옵션으로 노출되면 사용자가 체크했을 때 `parseSharedTargets`가 400 `INVALID_TARGET_VALUE`로 거부해 접수 전체가 실패했다(공유만 누락되는 게 아니라 제출 자체가 막힘). 실제로 로컬 DB의 `org_directory`에 `dept_function=''`(빈 문자열, NULL 아님) 행이 4건 있었고 `/api/dept-options`가 이를 그대로 응답에 실어 보내고 있었다 — UI가 깨지지 않은 유일한 이유는 클라이언트(`SharingEditor.tsx`)의 `if (!o.dept_function) continue` falsy 가드였다. `/api/dept-options`가 화이트리스트(직무 6종)에 있는 값만 내보내도록 필터해, 검증 불가능한 옵션이 애초에 화면에 뜨지 않게 했다(fail-safe: 400 대신 "옵션 미표시"). 직무 6종 상수 `FUNCTION_TARGETS`를 `server/src/services/sharing.ts`에서 `server/src/http.ts`(`ORGS`·`VISIBILITIES`와 같은 위치)로 옮겨 `sharing.ts`(입력 검증)와 `meta.ts`(옵션 노출 필터)가 하나의 정의를 공유하도록 했다 — 서버 내 정의는 한 곳. 회귀 테스트(`test:api`, `test-api-list.ts`): 화이트리스트 밖 값(`'없는팀'`)·빈 문자열 `dept_function`을 가진 `org_directory` 행을 `try/finally`로 임시 삽입해 `/api/dept-options` 응답에서 빠지는지 확인, 정상 직무 값도 함께 삽입해 과잉 차단이 없는지(여전히 응답에 포함) 확인. 수정 전/후 실제 DB 조회로 재현: 수정 전 12행(빈 문자열 `공통 | ` 포함) → 수정 후 11행(빈 문자열 제외, 나머지 전부 보존).
   - **[Minor] 서버 `FUNCTION_TARGETS` 사본 주석이 클라이언트를 가리키는 단방향이었던 문제** (`src/lib/constants.ts`): 위 이동으로 서버 사본(`server/src/http.ts`)의 주석은 여전히 클라이언트 `src/lib/constants.ts`를 참조하지만, 클라이언트 쪽에는 역참조가 없어 한쪽만 고치고 다른 쪽을 놓치기 쉬웠다. 클라이언트 `FUNCTION_TARGETS`에도 "서버 사본(`server/src/http.ts`)과 동일해야 한다"는 주석을 추가해 양방향으로 연결했다.
