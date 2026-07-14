@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { sql } from 'drizzle-orm'
 import { db, withUser } from '../db/client.js'
 import { authenticate } from '../auth/session.js'
-import { visibilityFilter, canProcess, canChangeSharing } from '../authz.js'
+import { visibilityFilter, sharedWithMeSql, monitorScopeSql, canProcess, canChangeSharing } from '../authz.js'
 import { parseId, isOneOf, ORGS, TYPE_CODES, PRIORITIES, VISIBILITIES } from '../http.js'
 import { changeStatus, TransitionError } from '../services/transition.js'
 import { assignRequest, AssignError } from '../services/assign.js'
@@ -24,11 +24,20 @@ export async function requestRoutes(app: FastifyInstance) {
   app.addHook('preHandler', authenticate)
 
   // 내가 볼 수 있는 요청 목록 (request_view + visibilityFilter). 최신순
+  //
+  // 목록 화면의 탭(공유받은 요청 / 우리 기관·부서)이 "왜 이 요청이 나에게 보이는가"로 나뉘므로
+  // 그 근거를 행마다 플래그로 함께 내려준다 — 클라이언트는 requester_id 비교밖에 못 하고,
+  // 공개범위·공유대상·소속 매칭을 프론트에서 다시 계산하면 서버 필터와 어긋날 위험이 있다.
+  // 두 플래그 모두 "내 것이 아닌 것"만 참으로 둔다(내 요청은 '나의 요청' 탭 하나에만 속하게).
   app.get('/api/requests', async (request) => {
     const u = request.currentUser!
     const filter = visibilityFilter(u)
+    const notMine = sql`r.requester_id is distinct from ${u.id}`
     const r = await db.execute(sql`
-      select r.* from request_view r
+      select r.*,
+             (${notMine} and ${sharedWithMeSql(u)}) as shared_to_me,
+             (${notMine} and ${monitorScopeSql(u)}) as in_monitor_scope
+      from request_view r
       where ${filter}
       order by r.created_at desc`)
     return r.rows

@@ -111,28 +111,43 @@ export function canChangeSharing(u: CurrentUser, requesterId: string | null): bo
 }
 
 /**
- * 목록 조회용 WHERE 필터. `r` 별칭(requests 또는 request_view) 기준.
- * 전체 열람(system·system_admin·exec)은 true.
- * 모니터링 관리자는 본인 소속 범위를 추가로 본다. 소속이 null이면 추가 범위 없음.
+ * 요청이 나에게 보이는 "근거"는 넷뿐이다:
+ *   ① 내가 요청자   ② 모니터 소속 범위   ③ 공유(공개범위·공유대상)   ④ 전체열람 특권
+ * 목록 필터(visibilityFilter)와 목록 화면의 탭(공유받은 / 우리 기관·부서)이
+ * 같은 조각을 쓰도록 ②③을 아래 두 함수로 떼어냈다 — 필터와 탭이 서로 어긋나지 않게 하기 위함.
+ * 모든 조각은 `r` 별칭(requests 또는 request_view) 기준이다.
  */
-export function visibilityFilter(u: CurrentUser): SQL {
-  if (canSeeAllRequests(u)) return sql`true`
-  const uid = u.id
+
+/**
+ * ② 모니터 소속 범위 — 공개범위와 무관하게 자기 기관/부서 요청을 본다.
+ * 모니터 역할이 아니거나 소속이 null이면 null 바인딩 → SQL에서 항상 거짓.
+ */
+export function monitorScopeSql(u: CurrentUser): SQL {
   const org = u.orgAffil
   const fn = u.deptFunction
-  const deptTarget = org != null && fn != null ? `${org}|${fn}` : null
-
-  // 모니터링 범위: 해당 역할이 아니거나 소속이 null이면 null 바인딩 → SQL에서 항상 거짓
   const orgMonitorOrg = isOrgMonitor(u) ? org : null
   const deptMonitorOrg = isDeptMonitor(u) && fn != null ? org : null
   const deptMonitorFn = isDeptMonitor(u) && org != null ? fn : null
 
   return sql`(
-    r.requester_id = ${uid}
-    or (r.requester_org is not null and r.requester_org::text = ${orgMonitorOrg})
+    (r.requester_org is not null and r.requester_org::text = ${orgMonitorOrg})
     or (r.requester_org is not null and r.requester_function is not null
         and r.requester_org::text = ${deptMonitorOrg} and r.requester_function = ${deptMonitorFn})
-    or r.visibility = 'shared'
+  )`
+}
+
+/**
+ * ③ 공유 근거 — 공개범위가 내 소속을 덮거나, 명시적 공유대상이 나를 지목한 경우.
+ * 역할 특권(④ 전체열람, ② 모니터 범위)은 여기 포함하지 않는다:
+ * "공유받은 요청" 탭이 전체열람 권한자에게 회사 전체를 보여주면 라벨이 거짓말이 된다.
+ */
+export function sharedWithMeSql(u: CurrentUser): SQL {
+  const org = u.orgAffil
+  const fn = u.deptFunction
+  const deptTarget = org != null && fn != null ? `${org}|${fn}` : null
+
+  return sql`(
+    r.visibility = 'shared'
     or (r.visibility = 'org' and r.requester_org is not null and r.requester_org::text = ${org})
     or (r.visibility = 'function' and r.requester_function is not null and r.requester_function = ${fn})
     or (r.visibility = 'dept' and r.requester_org is not null and r.requester_function is not null
@@ -144,5 +159,18 @@ export function visibilityFilter(u: CurrentUser): SQL {
         or (st.target_type = 'dept' and st.target_value = ${deptTarget})
       )
     )
+  )`
+}
+
+/**
+ * 목록 조회용 WHERE 필터 = ① 내가 요청자 or ② 모니터 범위 or ③ 공유.
+ * 전체 열람(system·system_admin·exec)은 true(④).
+ */
+export function visibilityFilter(u: CurrentUser): SQL {
+  if (canSeeAllRequests(u)) return sql`true`
+  return sql`(
+    r.requester_id = ${u.id}
+    or ${monitorScopeSql(u)}
+    or ${sharedWithMeSql(u)}
   )`
 }
