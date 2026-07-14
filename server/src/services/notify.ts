@@ -7,7 +7,7 @@ import { db } from '../db/client.js'
  */
 export async function notify(
   userId: string,
-  type: 'assigned' | 'status' | 'comment',
+  type: 'assigned' | 'status' | 'comment' | 'dispute',
   requestId: number,
   message: string,
 ): Promise<void> {

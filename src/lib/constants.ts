@@ -35,21 +35,22 @@ export const ORG_OPTIONS: RequestOrg[] = ['배움', '배론', '허브', '공통'
 // 우선순위 (request_priority enum) — 하위 호환용
 export const PRIORITY_OPTIONS: RequestPriority[] = ['긴급', '보통', '낮음']
 
-// P1 확정 6종 상태 (서버 API 계약과 동일)
+// P1 확정 7종 상태 (서버 API 계약과 동일) — 검수대기는 진행중↔완료 사이 검수 단계
 export const STATUS_OPTIONS: RequestStatus[] = [
   '접수',
   '진행중',
+  '검수대기',
   '보류',
   '완료',
   '반려',
   '철회',
 ]
 
-// 요청 처리 화면의 칸반 컬럼 — 철회는 아카이브성이므로 제외
-export const BOARD_STATUSES: RequestStatus[] = ['접수', '진행중', '보류', '완료', '반려']
+// 요청 처리 화면의 칸반 컬럼 — 검수대기 포함, 철회는 아카이브성이므로 제외
+export const BOARD_STATUSES: RequestStatus[] = ['접수', '진행중', '검수대기', '보류', '완료', '반려']
 
-// 열린(진행 중인) 상태 — 요청 목록 기본 저장뷰에서 종결 제외 필터에 사용
-export const OPEN_STATUSES: RequestStatus[] = ['접수', '진행중', '보류']
+// 열린(진행 중인) 상태 — 검수대기도 아직 종결이 아니므로 포함
+export const OPEN_STATUSES: RequestStatus[] = ['접수', '진행중', '검수대기', '보류']
 
 // 종결 상태 — server/src/services/impact.ts의 CLOSED와 동일 (영향도 소급 변경 금지 기준)
 export const CLOSED_STATUSES: RequestStatus[] = ['완료', '반려', '철회']
@@ -58,6 +59,7 @@ export const CLOSED_STATUSES: RequestStatus[] = ['완료', '반려', '철회']
 export const STATUS_BADGE: Record<RequestStatus, string> = {
   접수: 'bg-sky-500 text-white',
   진행중: 'bg-indigo-600 text-white',
+  검수대기: 'bg-purple-600 text-white',
   보류: 'bg-amber-500 text-white',
   완료: 'bg-green-600 text-white',
   반려: 'bg-red-600 text-white',
@@ -75,18 +77,31 @@ export const PRIORITY_LEVEL_BADGE: Record<PriorityLevel, string> = {
 // WIP 임계 — 칸반 컬럼당 카드 수가 이 값을 초과하면 경고 표시
 export const WIP_LIMIT = 12
 
-// 허용 전이 매트릭스 (서버 API 계약 §PATCH /api/requests/:id 와 동일)
+// 허용 전이 매트릭스 (서버 transition.ts의 ALLOWED와 동일해야 한다)
+// 진행중 → 완료 직행은 없다. 완료에 도달하려면 반드시 검수대기를 거친다.
 export const ALLOWED_TRANSITIONS: Record<RequestStatus, RequestStatus[]> = {
   접수: ['진행중', '반려', '철회'],
-  진행중: ['완료', '보류', '반려', '접수'], // 접수: 배정 취소(되돌리기) — 서버가 배정 정보를 초기화
+  진행중: ['검수대기', '보류', '반려', '접수'], // 완료 직행 불가(검수대기 경유) · 접수: 배정 취소(되돌리기)
+  검수대기: ['완료', '진행중'],
   보류: ['진행중'],
-  완료: ['진행중'], // 재작업
+  완료: ['진행중'], // 이의 수락 경로로만
   반려: [],
   철회: [],
 }
 
+// 검수·이의제기 정책 (서버 server/src/services/inspection.ts와 같은 값)
+export const INSPECTION_DAYS = 7
+export const DISPUTE_WINDOW_DAYS = 14
+
+/** 최종 완료 시각 기준으로 아직 이의제기가 가능한지 — 버튼 노출 판정용 */
+export function isDisputable(completedAt: string | null): boolean {
+  if (completedAt === null) return false
+  const deadline = new Date(completedAt).getTime() + DISPUTE_WINDOW_DAYS * 86_400_000
+  return Date.now() <= deadline
+}
+
 // 기한상태(request_view.due_status)별 뱃지 색상 — 초과·임박 강조
-// DB 생성값: '기한초과'|'임박'|'여유'|RequestStatus(완료/반려/철회)
+// DB 생성값: '기한초과'|'임박'|'여유'|RequestStatus(검수대기/완료/반려/철회)
 export function dueBadgeClass(due: string | null): string {
   switch (due) {
     case '기한초과':
@@ -95,6 +110,8 @@ export function dueBadgeClass(due: string | null): string {
       return 'bg-amber-100 text-amber-800'
     case '여유':
       return 'bg-gray-100 text-gray-500'
+    case '검수대기':
+      return 'bg-purple-100 text-purple-700'
     case '완료':
       return 'bg-green-100 text-green-700'
     default:

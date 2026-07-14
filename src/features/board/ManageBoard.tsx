@@ -570,7 +570,20 @@ export function ManageBoard() {
           {r.rework_count != null && r.rework_count > 0 && (
             <Badge className="bg-orange-100 text-orange-700">재{r.rework_count}</Badge>
           )}
+          {r.has_open_dispute && (
+            <Badge className="bg-amber-100 text-amber-700">이의 심사중</Badge>
+          )}
         </div>
+        {r.status === '검수대기' && r.inspection_due_at != null && (
+          <span className="mt-1 block text-xs text-purple-700">
+            자동완료{' '}
+            {Math.max(
+              0,
+              Math.ceil((new Date(r.inspection_due_at).getTime() - Date.now()) / 86_400_000),
+            )}
+            일 남음
+          </span>
+        )}
         {/* SLA/기한 */}
         <div className="mt-1 flex items-center gap-1.5">
           <Badge className={dueBadgeClass(r.due_status)}>{r.due_status ?? '-'}</Badge>

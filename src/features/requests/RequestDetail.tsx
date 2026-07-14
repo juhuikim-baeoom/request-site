@@ -24,7 +24,6 @@ import {
   useAddComment,
   useCancelRequest,
   useChangeSharing,
-  useCsat,
   useRequestAttachments,
   useRequestComments,
   useRequestDetail,
@@ -35,6 +34,8 @@ import {
   useUploadCommentAttachment,
   type ImpactLevel,
 } from './api'
+import { InspectionPanel } from './InspectionPanel'
+import { DisputePanel } from './DisputePanel'
 
 const fieldCls =
   'mt-1 block w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-brand focus:outline-none focus:ring-1 focus:ring-brand'
@@ -116,7 +117,6 @@ export function RequestDetail() {
   const uploadCommentAttachment = useUploadCommentAttachment(id)
   const updateRequest = useUpdateRequest(id)
   const cancelRequest = useCancelRequest(id)
-  const csatMutation = useCsat(id)
   const reworkMutation = useRework(id)
   const changeSharing = useChangeSharing(id)
 
@@ -148,10 +148,6 @@ export function RequestDetail() {
   // 재작업
   const [showReworkModal, setShowReworkModal] = useState(false)
   const [reworkReason, setReworkReason] = useState('')
-
-  // CSAT
-  const [csatComment, setCsatComment] = useState('')
-  const [csatPending, setCsatPending] = useState<-1 | 1 | null>(null)
 
   function handleDownload(attachmentId: number) {
     window.open(getAttachmentUrl(attachmentId), '_blank', 'noopener')
@@ -229,19 +225,6 @@ export function RequestDetail() {
     }
   }
 
-  async function handleCsat(rating: -1 | 1) {
-    setCsatPending(rating)
-    try {
-      await csatMutation.mutateAsync({
-        rating,
-        comment: csatComment.trim() || undefined,
-      })
-      setCsatComment('')
-    } finally {
-      setCsatPending(null)
-    }
-  }
-
   if (isLoading) {
     return <div className="p-8 text-center text-gray-400">불러오는 중…</div>
   }
@@ -264,10 +247,6 @@ export function RequestDetail() {
   const canWithdraw = canEdit && (ALLOWED_TRANSITIONS[v.status as RequestStatus] ?? []).includes('철회')
   const isRequester = v.requester_id === profile?.id
   const canRework = canProcessRequest && v.status === '완료'
-  const canCsat =
-    isRequester && v.status === '완료' && (v.csat_rating == null || v.csat_rating === undefined)
-  const csatSubmitted =
-    isRequester && v.status === '완료' && v.csat_rating != null && v.csat_rating !== undefined
 
   // ---------- 타임라인 병합 ----------
   const timeline: TimelineItem[] = []
@@ -682,60 +661,11 @@ export function RequestDetail() {
         </>
       )}
 
-      {/* CSAT */}
-      {canCsat && (
-        <div className="rounded-lg border border-green-200 bg-green-50 p-4 space-y-3">
-          <p className="text-sm font-semibold text-green-800">
-            처리 결과에 만족하셨나요?
-          </p>
-          <p className="text-xs text-green-700">
-            완료된 요청의 처리 품질 개선을 위해 간단한 평가를 남겨주세요.
-          </p>
-          <div className="flex gap-3">
-            <button
-              onClick={() => void handleCsat(1)}
-              disabled={csatMutation.isPending}
-              className="flex items-center gap-1.5 rounded-md border border-green-300 bg-white px-4 py-2 text-sm font-medium text-green-700 hover:bg-green-100 disabled:opacity-60"
-            >
-              👍 만족
-            </button>
-            <button
-              onClick={() => void handleCsat(-1)}
-              disabled={csatMutation.isPending}
-              className="flex items-center gap-1.5 rounded-md border border-red-200 bg-white px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-60"
-            >
-              👎 불만족
-            </button>
-          </div>
-          <textarea
-            className={`${fieldCls} min-h-[60px] resize-none`}
-            value={csatComment}
-            onChange={(e) => setCsatComment(e.target.value)}
-            placeholder="추가 의견 (선택)"
-          />
-          {csatPending !== null && (
-            <p className="text-xs text-green-700">
-              {csatPending === 1 ? '만족' : '불만족'} 평가를 제출 중…
-            </p>
-          )}
-          {csatMutation.isError && (
-            <p className="text-xs text-red-600">
-              {csatMutation.error instanceof Error
-                ? csatMutation.error.message
-                : '평가 제출 중 오류가 발생했습니다.'}
-            </p>
-          )}
-        </div>
-      )}
-      {csatSubmitted && (
-        <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-700">
-          <span className="font-medium">만족도 평가:</span>{' '}
-          {v.csat_rating === 1 ? '👍 만족' : '👎 불만족'}
-          {v.csat_comment && (
-            <p className="mt-1 text-xs text-gray-500">{v.csat_comment}</p>
-          )}
-        </div>
-      )}
+      {/* 검수 패널 (검수대기 상태에서만 렌더) */}
+      <InspectionPanel request={v} requestId={id} isOwner={isRequester} isSystem={canProcessRequest} />
+
+      {/* 이의제기 패널 (완료 상태 또는 이의 이력이 있을 때만 렌더) */}
+      <DisputePanel request={v} requestId={id} isOwner={isRequester} isSystem={canProcessRequest} />
 
       {/* 통합 타임라인 */}
       <div>

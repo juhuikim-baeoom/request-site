@@ -71,6 +71,41 @@
       "when": 1784000000050,
       "tag": "0009_gen_seq_lpad_overflow",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1784000000060,
+      "tag": "0010_add_inspection_enums",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1784000000070,
+      "tag": "0011_inspection_and_disputes",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1784000000080,
+      "tag": "0012_completion_note",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1784000000090,
+      "tag": "0013_inspection_reminder",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1784000000100,
+      "tag": "0014_rearm_inspection_reminder",
+      "breakpoints": true
     }
   ]
 }

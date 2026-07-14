@@ -33,10 +33,11 @@ source_of_truth: server/src/db/schema.ts, server/drizzle/0001_triggers.sql
 | `request_status_history` | 상태 변경 이력 | 트리거 자동 기록, changed_by = app.user_id |
 | `request_attachments` | 첨부 메타 | commentId(nullable) 연결 가능 |
 | `request_shared_targets` | 공유 대상 | visibility='shared'일 때 대상 목록 |
+| `request_disputes` | 완료 후 이의제기 | 완료 후 14일 이내, 동시 열린 이의 1건 제한(부분 유니크 인덱스). 마이그레이션 `0011` |
 | `request_sharing_history` | 공유 설정(공개범위·공유대상) 변경 이력 | `added`/`removed` jsonb — 서버가 기존 목록과 비교해 계산(클라이언트가 보낸 값은 신뢰하지 않음), `from_visibility`/`to_visibility`는 공개범위가 실제로 바뀐 경우에만 채워짐. 마이그레이션 `0007` |
 | `role_backfill_history` | 백필 적용 이력 마커 | `backfill_key` PK — `server/src/db/backfill-roles.ts`가 최초 1회만 실행되도록 원자적으로 claim |
 
-관계: `requests` 1→N `comments` / `history` / `attachments` / `shared_targets` / `sharing_history`.
+관계: `requests` 1→N `comments` / `history` / `attachments` / `shared_targets` / `disputes` / `sharing_history`.
 `requests.parent_request_id`로 하위건 자기참조 연결.
 
 ---
@@ -45,13 +46,16 @@ source_of_truth: server/src/db/schema.ts, server/drizzle/0001_triggers.sql
 
 | Enum | 값 |
 | --- | --- |
-| `request_status` | 접수 / 진행중 / 보류 / 완료 / 반려 / 철회 |
+| `request_status` | 접수 / 진행중 / 검수대기 / 보류 / 완료 / 반려 / 철회 |
 | `urgency_level` | 높음 / 보통 / 낮음 |
 | `priority_level` | P1 / P2 / P3 / P4 |
 | `request_org` | 배움 / 배론 / 허브 / 공통 |
 | `request_source` | web / email |
 | `request_visibility` | private / dept / function / org / shared |
 | `user_role` | staff / system / viewer(폐기, 신규 부여 금지) / dept_monitor / org_monitor / exec / system_admin |
+| `notification_type` | assigned / status / comment / dispute |
+
+`검수대기`는 `진행중`과 `보류` 사이에 삽입됐다(마이그레이션 `0010_add_inspection_enums.sql`). `notification_type`의 `dispute`도 같은 마이그레이션에서 추가됐다 — Postgres 16에서 `ALTER TYPE ... ADD VALUE`는 같은 트랜잭션에서 바로 참조할 수 없어, 새 값을 실제로 쓰는 컬럼·트리거·뷰는 `0011_inspection_and_disputes.sql`로 분리했다. (main의 역할 모델 마이그레이션 `0005`~`0009`와 번호가 겹쳐, 이의제기 기능 마이그레이션은 `0010`~`0014`로 재번호했다.)
 
 `user_role`은 `server/drizzle/0005_role_model_add_values.sql`(`ALTER TYPE ... ADD VALUE`)에서
 `dept_monitor`·`org_monitor`·`exec`·`system_admin` 4종을 추가했다. 기존 DB의 데이터 이전
@@ -103,15 +107,21 @@ CONFLICT DO NOTHING RETURNING`)하고, claim에 성공했을 때만 실제 UPDAT
 ### 3-4. 기한·SLA
 - `desired_due` date — 요청자 희망일
 - `assigned_at`, `response_due_at`, `resolution_due_at` timestamptz
-- `first_response_at`, `first_resolved_at`, `final_resolved_at` timestamptz
+- `first_response_at` timestamptz
+- `first_resolved_at` timestamptz — **팀이 손을 뗀 시점**. 최초로 `검수대기`에 진입한 시각(트리거가 최초 1회만 세팅, 재작업 재진입 시 보존). 해결 SLA(`sla_resolution_breached`) 판정 기준
+- `final_resolved_at` timestamptz — **요청자가 납득한 시점**. `완료` 진입마다 갱신(확인/자동/강제 공통). 종결 리드타임 기준
 - `sla_response_breached`, `sla_resolution_breached` boolean default false
-- `completed_at` timestamptz — 최종 완료일 (트리거 관리)
+- `completed_at` timestamptz — 최종 완료일 (트리거 관리, `final_resolved_at`과 동일 시점)
+- `inspection_due_at` timestamptz nullable — 검수대기 진입 시각 + 7일. 자동완료 배치 조회 조건. `완료`/`진행중` 재전이 시 `null`로 리셋
+- `inspection_reminder_sent_at` timestamptz nullable — 검수대기 3일 경과 리마인더 발송 여부(건당 1회) 기록. 검수대기 재진입(재작업 후 재검수) 시 `null`로 재무장되어 라운드마다 리마인더가 다시 나갈 수 있다(`0009_rearm_inspection_reminder.sql`)
 
 ### 3-5. 후처리
-- `csat_rating` smallint nullable — 값 -1(불만족) / 1(만족), 앱에서 검증
+- `csat_rating` smallint nullable — 1~5점 척도(4점 이상=긍정), 요청자가 검수대기를 확인(`REQUESTER` 완료)하는 순간에만 저장. **구 thumbs(-1/1) 모델은 폐기**됐고 이를 쓰던 `POST /api/requests/:id/csat` 엔드포인트는 제거됨(현재 유일한 기록 경로는 `PATCH /api/requests/:id`의 검수 승인 분기)
 - `csat_comment` text
 - `hold_reason`, `reject_reason`, `rework_reason` text
-- `rework_count` integer default 0
+- `rework_count` integer default 0 — `검수대기 → 진행중`(검수 반려) 또는 `완료 → 진행중`(이의제기 수락) 시마다 증가
+- `completion_route` varchar(16) nullable — `REQUESTER`(요청자 확인) / `AUTO`(7일 무응답 자동완료) / `SYSTEM_FORCED`(시스템팀 강제완료, 사유 필수). CHECK 제약으로 값 제한
+- `completion_note` text nullable — `SYSTEM_FORCED` 강제완료 사유
 
 ---
 
@@ -128,13 +138,34 @@ CONFLICT DO NOTHING RETURNING`)하고, claim에 성공했을 때만 실제 UPDAT
 
 ## 5. 상태 흐름
 
-`접수 → 진행중 → 완료` (주요 경로)
+`접수 → 진행중 → 검수대기 → 완료` (주요 경로)
 `→ 보류` (일시 중단) / `→ 반려` (처리 불가) / `→ 철회` (요청자 취소)
+
+`진행중 → 완료` 직행 전이는 제거됐다. 작업이 끝나면 반드시 `검수대기`를 거쳐 요청자 확인(또는 7일 자동완료·시스템팀 강제완료)을 받아야 `완료`에 도달한다.
+
+```mermaid
+stateDiagram-v2
+    [*] --> 접수
+    접수 --> 진행중
+    접수 --> 반려
+    접수 --> 철회
+    진행중 --> 검수대기 : 시스템팀 작업 완료
+    진행중 --> 보류
+    진행중 --> 반려
+    보류 --> 진행중
+    검수대기 --> 완료 : 요청자 확인 · 7일 자동완료 · 시스템팀 강제완료
+    검수대기 --> 진행중 : 요청자 재작업 요청 (사유 필수)
+    완료 --> 진행중 : 이의제기 수락 (사유 필수)
+    반려 --> [*]
+    철회 --> [*]
+```
 
 상태 변경 시 트리거(`on_status_change`)가 자동으로:
 - `request_status_history`에 이력 기록 (changed_by = `app.user_id` 세션 변수)
-- `완료` 진입 시: `completed_at`·`first_resolved_at`(최초 1회)·`final_resolved_at` 세팅, `resolution_due_at` 초과 시 `sla_resolution_breached=true`
-- `완료 → 진행중` 되돌림 시: `completed_at`·`final_resolved_at` 해제 + `rework_count +1`
+- `검수대기` 진입 시: `first_resolved_at`(최초 1회만 세팅 — 팀이 손을 뗀 시점)·`inspection_due_at`(now+7일) 세팅, `inspection_reminder_sent_at`을 `null`로 재무장(재검수 라운드마다 3일차 리마인더가 다시 나가도록), `resolution_due_at` 초과 시 `sla_resolution_breached=true`
+- `완료` 진입 시: `completed_at`·`final_resolved_at`(매번 갱신)·`first_resolved_at`(미세팅 시 보정) 세팅, `inspection_due_at` 해제
+- `검수대기 → 진행중`(검수 반려) 또는 `완료 → 진행중`(이의제기 수락) 되돌림 시: `completed_at`·`final_resolved_at`·`inspection_due_at`·`completion_route` 해제 + `rework_count +1` + `sla_resolution_breached` 리셋
+- 완료 경로는 `completion_route`(`REQUESTER`/`AUTO`/`SYSTEM_FORCED`)로 구분 기록되며, `SYSTEM_FORCED`는 `completion_note`에 사유가 남는다
 
 ---
 
@@ -143,13 +174,38 @@ CONFLICT DO NOTHING RETURNING`)하고, claim에 성공했을 때만 실제 UPDAT
 `request_view`를 조회하면 아래가 계산됩니다:
 
 - `type_label` — request_types.label 조인
-- `first_lead_days` — first_resolved_at::date - created_at::date
-- `final_lead_days` — final_resolved_at::date - created_at::date
+- `first_lead_days` — first_resolved_at::date - created_at::date (팀 실작업 리드타임)
+- `final_lead_days` — final_resolved_at::date - created_at::date (종결 리드타임)
 - `due_status` — 다음 규칙으로 계산:
-  - 상태가 완료/반려/철회 → 상태 그대로
-  - resolution_due_at 있고 `now() > resolution_due_at` → '초과'
+  - 상태가 완료/반려/철회/**검수대기** → 상태 그대로 (검수대기는 팀이 이미 손을 뗐으므로 요청자가 확인을 늦게 해도 기한초과로 표시하지 않음)
+  - resolution_due_at 있고 `now() > resolution_due_at` → '기한초과'
   - resolution_due_at 있고 `resolution_due_at - now() < 4시간` → '임박'
-  - 그 외 → '정상'
+  - 그 외 → '여유'
+- `has_open_dispute` — `request_disputes`에 해당 요청 대상 `status_cd='OPEN'` 행이 있는지 여부(boolean). 목록·보드의 뱃지·필터가 참조
+
+---
+
+## 6-1. request_disputes (완료 후 이의제기)
+
+완료된 요청에 대해 요청자가 이의를 제기하는 이력 테이블. 상태값으로 만들지 않고 별도 테이블로 분리해, 심사 기간 동안에도 `requests.status`는 `완료`로 유지되어 완료 건수·리드타임 집계가 흔들리지 않게 한다.
+
+| 컬럼 | 타입 | 설명 |
+| --- | --- | --- |
+| `id` | bigserial PK | |
+| `request_id` | bigint FK → requests(id), ON DELETE CASCADE | |
+| `raised_by` | uuid FK → users(id) | 이의 제기자(요청자 본인) |
+| `reason` | text not null | 이의 사유 |
+| `status_cd` | varchar(16) not null default 'OPEN' | CHECK: `OPEN` / `ACCEPTED` / `REJECTED` |
+| `reviewed_by` | uuid FK → users(id) nullable | 심사한 시스템팀 계정 |
+| `review_comment` | text nullable | 심사 코멘트(기각 사유 등) |
+| `reviewed_at` | timestamptz nullable | 심사 완료 시각 |
+| `created_at` / `updated_at` | timestamptz not null default now() | |
+
+**제약**: 부분 유니크 인덱스 `request_disputes_one_open` — `(request_id) WHERE status_cd = 'OPEN'`. 한 요청에 동시에 열린 이의는 1건만 허용(이의 제기 횟수 자체는 제한 없음, 기각된 이의도 행으로 남아 집계에 쓰인다).
+
+**API**: `POST /api/requests/:id/disputes`(요청자, 완료 후 14일 이내·열린 이의 없음), `GET /api/requests/:id/disputes`(열람 권한자), `PATCH /api/disputes/:id`(시스템팀, `ACCEPTED`면 같은 트랜잭션에서 `완료 → 진행중` 전이까지 수행).
+
+RLS를 쓰지 않으므로(자체 Postgres 이전 이후) 권한은 앱 계층(`server/src/authz.ts`, `server/src/routes/disputes.ts`)에서 강제한다.
 
 ---
 

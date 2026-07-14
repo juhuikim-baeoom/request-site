@@ -144,8 +144,14 @@ async function clearNotifs(): Promise<void> {
 {
   await clearNotifs()
 
-  // req 현재 상태: 진행중 (배정 후). sysId가 완료로 변경 → staffUser(requester)에게 알림
-  await changeStatus({ reqId, to: '완료', actorId: sysId })
+  // req 현재 상태: 진행중 (배정 후). 진행중 → 완료 직행은 없으므로 검수대기를 먼저 거친다.
+  // 검수대기 진입 알림은 이 테스트의 관심사가 아니므로 비우고, 완료 전이만 관찰한다.
+  await changeStatus({ reqId, to: '검수대기', actorId: sysId })
+  await tick()
+  await clearNotifs()
+
+  // 검수대기 → 완료(SYSTEM_FORCED 경로): sysId가 완료로 변경 → staffUser(requester)에게 알림
+  await changeStatus({ reqId, to: '완료', actorId: sysId, completionRoute: 'SYSTEM_FORCED' })
   await tick()
 
   const notifRows = await db.execute<{ user_id: string; type: string; message: string }>(sql`

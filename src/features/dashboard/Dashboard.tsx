@@ -269,6 +269,18 @@ export function Dashboard() {
 
       {data && (
         <>
+          {/* ── 열린 이의 배너 ── */}
+          {data.kpis.openDisputeCount > 0 && (
+            <div className="mb-4 rounded-lg border border-amber-300 bg-amber-50 p-3">
+              <p className="text-sm font-medium text-amber-900">
+                심사 대기 중인 이의 {data.kpis.openDisputeCount}건
+              </p>
+              <p className="mt-0.5 text-xs text-amber-800">
+                완료 처리된 요청에 요청자가 이의를 제기했습니다. 상세 화면에서 수락 또는 기각해주세요.
+              </p>
+            </div>
+          )}
+
           {/* ── KPI 카드 ── */}
           <Section title="KPI 현황">
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
@@ -305,9 +317,29 @@ export function Dashboard() {
                     : undefined
                 }
               />
+              <KpiCard
+                label="이의제기율"
+                value={fmtPct(data.kpis.disputeRate)}
+                sub="완료 건 대비"
+                highlight={
+                  data.kpis.disputeRate != null && data.kpis.disputeRate >= 0.1
+                    ? 'amber'
+                    : undefined
+                }
+              />
+              <KpiCard
+                label="이의 수락률"
+                value={fmtPct(data.kpis.disputeAcceptRate)}
+                sub="수락이 높으면 구현 품질, 기각이 높으면 요건 정의 문제"
+              />
+              <KpiCard
+                label="평균 검수 소요일"
+                value={data.kpis.avgInspectionDays != null ? `${data.kpis.avgInspectionDays.toFixed(1)}일` : '-'}
+                sub="요청자가 확인에 걸리는 시간"
+              />
             </div>
             <p className="mt-2 text-xs text-gray-400">
-              미완료: 접수·진행중·보류 상태 합계 / 기한초과+임박: due_status 기준 / 재작업율: 완료 건 중 rework_count&gt;0 / 만족도: csat_rating=1 비율
+              미완료: 접수·진행중·보류 상태 합계 / 기한초과+임박: due_status 기준 / 재작업율: 완료 건 중 rework_count&gt;0 / 만족도: csat_rating=1 비율 / 이의제기율·수락률: 완료 건 대비 이의제기·수락 비율 / 평균 검수 소요일: 팀 처리 완료 후 최종 확정까지
             </p>
           </Section>
 
@@ -401,7 +433,7 @@ export function Dashboard() {
 
           {/* ── 분포 차트 ── */}
           <Section title="분포">
-            <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+            <div className="grid grid-cols-1 gap-6 lg:grid-cols-4">
               {/* 상태별 */}
               <div className="rounded-lg border border-gray-200 bg-white p-4">
                 <h3 className="text-sm font-semibold text-gray-700 mb-3">상태별</h3>
@@ -513,6 +545,28 @@ export function Dashboard() {
                     </ul>
                   </>
                 )}
+              </div>
+
+              {/* 완료 경로 */}
+              <div className="rounded-lg border border-gray-200 bg-white p-4">
+                <h3 className="text-sm font-semibold text-gray-900">완료 경로</h3>
+                <p className="mt-0.5 text-xs text-gray-500">
+                  자동완료 비중이 크면 요청자가 검수를 하지 않고 있다는 신호입니다.
+                </p>
+                <ul className="mt-2 space-y-1 text-sm">
+                  <li className="flex justify-between">
+                    <span className="text-gray-700">요청자 확인</span>
+                    <span className="font-medium text-green-700">{data.kpis.completionRoutes.REQUESTER}건</span>
+                  </li>
+                  <li className="flex justify-between">
+                    <span className="text-gray-700">자동 완료 (무응답)</span>
+                    <span className="font-medium text-amber-700">{data.kpis.completionRoutes.AUTO}건</span>
+                  </li>
+                  <li className="flex justify-between">
+                    <span className="text-gray-700">시스템팀 강제 완료</span>
+                    <span className="font-medium text-gray-700">{data.kpis.completionRoutes.SYSTEM_FORCED}건</span>
+                  </li>
+                </ul>
               </div>
             </div>
           </Section>

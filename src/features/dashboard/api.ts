@@ -9,6 +9,11 @@ export interface DashboardKpis {
   p1p2Open: number
   reworkRate: number | null
   csatPositivePct: number | null
+  disputeRate: number | null
+  disputeAcceptRate: number | null
+  avgInspectionDays: number | null
+  openDisputeCount: number
+  completionRoutes: { REQUESTER: number; AUTO: number; SYSTEM_FORCED: number }
 }
 
 export interface DashboardLeadtime {

@@ -4,7 +4,27 @@
 
 ## [Unreleased]
 
+### Fixed
+- **대시보드 해결-SLA 준수율이 `final_resolved_at`(요청자 검수) 기준이던 것을 `first_resolved_at`(팀 종료) 기준으로 정정** (`server/src/routes/dashboard.ts`): 팀이 기한 안에 검수대기로 넘겼어도 요청자가 늦게 검수하면 SLA 위반으로 잘못 집계되던 문제. 리드타임 지표(`final_resolved_at` 기반)는 변경 없음.
+- **재작업 후 재검수 라운드에서 3일차 리마인더가 재발송되지 않던 문제 수정** (`server/drizzle/0009_rearm_inspection_reminder.sql`): `on_status_change` 트리거가 검수대기 진입 시 `inspection_reminder_sent_at`을 재설정하지 않아, 1차 검수 리마인더 발송 후 반려→재작업→재검수로 돌아가도 2차 검수에서는 리마인더가 다시 나가지 않았다. 검수대기 진입 시 `inspection_reminder_sent_at := null`로 재무장하도록 수정.
+
+### Added
+- **검수대기 단계와 완료 후 이의제기** (`server/drizzle/0005_add_inspection_enums.sql` ~ `0008_inspection_reminder.sql`, `server/src/services/transition.ts`, `server/src/routes/disputes.ts`, `server/src/jobs/auto-complete.ts`, `src/features/requests/RequestDetail.tsx`)
+  - `request_status` enum에 `검수대기` 추가(`진행중`과 `보류` 사이). 작업 종료 시 요청자 검수를 거쳐야 완료에 도달한다.
+  - 요청자 검수 승인: 만족도 1~5점 별점(`csat_rating`, 4점 이상=긍정)과 선택 코멘트를 검수 확인 시점에 수집 후 `완료`(`completion_route='REQUESTER'`)로 전이.
+  - 요청자 재작업 요청: 검수대기에서 사유(필수) 입력 후 `진행중`으로 되돌림(`rework_count +1`).
+  - 자동완료 배치: 검수대기 진입 7일 무응답 시 자동 완료(`completion_route='AUTO'`), 3일차에 리마인더 알림 1회 발송(`inspection_reminder_sent_at`).
+  - 시스템팀 강제완료: 검수를 건너뛰고 사유(`completion_note`)와 함께 완료 처리(`completion_route='SYSTEM_FORCED'`).
+  - 이의제기(`request_disputes` 테이블): 완료 후 14일 이내 요청자가 이의 제기 → 시스템팀 심사(수락 시 `완료 → 진행중` 재작업 전이, 기각 시 완료 유지 + 사유 통보). 한 요청당 동시 열린 이의 1건 제한(부분 유니크 인덱스 `request_disputes_one_open`).
+  - 알림: `notification_type`에 `dispute` 추가. 검수대기 진입·3일 리마인더·자동완료·이의 접수·이의 심사 완료 시점에 발송.
+  - 대시보드 신규 지표 4종: 이의제기율, 이의 수락률, 평균 검수 소요일, 완료 경로 분포(`REQUESTER`/`AUTO`/`SYSTEM_FORCED`), 열린 이의 수.
+
 ### Changed
+- `진행중 → 완료` 직행 전이를 제거했다. 완료에 도달하려면 반드시 검수대기를 거쳐야 한다.
+- `first_resolved_at`이 최종 완료가 아니라 검수대기 최초 진입 시점을 가리키도록 바꿨다(해결 SLA 판정 기준). `final_resolved_at`/`completed_at`은 요청자가 최종 납득한(완료 확정) 시점을 가리킨다(종결 리드타임 기준). 요청자가 검수를 늦게 해도 팀의 해결 SLA가 부당하게 위반되지 않게 하기 위함.
+- 재작업률(`rework_rate`)이 검수대기 반려(`검수대기 → 진행중`)도 포함하도록 넓어졌다. 완료 → 진행중(이의제기 수락)만 세던 기존 정의보다 넓다.
+- CSAT를 thumbs(👍/👎, `rating -1/1`)에서 1~5점 별점으로 전환했다. 수집 시점도 별도 `/csat` 엔드포인트 호출에서 요청자의 검수 승인 순간으로 이동. 대시보드 "만족도" 지표 기준을 `rating >= 4`로 재정의.
+- 구 thumbs CSAT 엔드포인트 `POST /api/requests/:id/csat`와 프론트 `useCsat` 훅을 제거했다(`server/src/routes/request-detail.ts`, `src/features/requests/api.ts`). CSAT가 1-5점 검수 승인 경로로 대체되며 사용되지 않게 됐고, 완료 상태인 `AUTO`/`SYSTEM_FORCED` 건(`csat_rating` null)에 직접 호출 시 thumbs 값 `-1`이 1-5점 컬럼에 잘못 저장될 위험이 있어 제거했다.
 - **공유대상 표기 통일 — 라벨 규칙이 세 곳에 흩어져 있던 문제** (`src/lib/constants.ts`의 `sharedTargetLabel`, `VisibilityBadge.tsx`, `RequestDetail.tsx`, `SharingTargetPicker.tsx`): 같은 공유대상이 화면마다 다르게 보였다 — 공개범위 뱃지는 `배움_교학팀`(밑줄), 선택 피커의 칩은 `배움 › 교학팀`, 활동 타임라인의 공유변경 행은 직무를 `시스템팀`(값 그대로)으로 적었다. 규칙을 `sharedTargetLabel()` 하나로 모아 세 곳이 공유한다: 직무는 "○○팀 전체", 세부부서는 "기관 › 팀". 후보 목록에 없는 값(조직도에서 빠진 팀 등)도 전송값에서 라벨을 만들어 항상 표시한다. `deptTargetLabel`(밑줄 표기)은 소비자가 없어져 제거했다. 전송값(`target_value`)은 불변.
 - **공유대상 선택 UI — 체크박스 17개 → 검색 + 칩** (`src/features/requests/SharingTargetPicker.tsx` 신규, `SharingEditor.tsx`): 340px 사이드바에 체크박스 17개(직무 6 + 세부부서 11)를 격자로 펼치다 보니 줄바꿈이 제멋대로 나고 `배움_교학팀` 같은 밑줄 라벨이 반복돼 읽기 어려웠다. 더 근본적으로는 **구조가 사용 빈도와 거꾸로**였다 — 공개범위 select가 흔한 경우를 이미 덮으므로 공유대상은 예외용이고 실제 선택은 대부분 0개인데, 거의 쓰지 않는 선택지 17개를 항상 펼쳐두고 있었다.
   - 기본 상태는 입력칸 한 줄("+ 공유대상 추가" 접힘 토글 제거). 타이핑하면 후보가 좁혀지고, 고른 것만 칩으로 남는다. 이미 고른 항목은 후보에서 빠진다.
@@ -101,7 +121,7 @@
 - **코멘트 작성기 공개/내부 상하 분리** (`src/features/requests/CommentComposer.tsx` 신규, `RequestDetail.tsx`): 내부메모/공개 토글 버튼(탭 방식)을 제거하고 공개 코멘트(위)·내부 메모(아래)를 각각 독립 폼으로 배치. 시스템팀에게만 내부 메모 폼이 보인다. 내부 메모는 코드·로그 입력을 전제로 monospace · 8행 · `wrap="off"` · spellcheck off · Tab 2칸 들여쓰기(Esc 후 Tab은 포커스 이동으로 빠져나감). 폼별로 본문·첨부·제출 상태와 오류 메시지를 각자 관리한다.
 - **진행중 → 접수 되돌리기(배정 취소) 허용** (`server/src/services/transition.ts`, `src/lib/constants.ts`): 허용 전이 매트릭스에 `진행중 → 접수`를 추가. 관리 보드에서 개별 드래그·리스트 인라인 select·벌크 상태 일괄변경 모두에서 진행중 건을 접수로 되돌릴 수 있다. 이전에는 매트릭스에 없어 서버가 `ILLEGAL_TRANSITION`으로 거부했다.
   - 되돌릴 때 서버가 배정 정보를 초기화한다: `assignee_id`·`impact`·`priority_level`·`assigned_at`·`first_response_at`·`response_due_at`·`resolution_due_at`·`sla_policy_id` → null, `sla_response_breached` → false. 미배정 큐로 복귀하며 재배정이 가능하다(`assignRequest`는 `status='접수'`만 대상으로 삼음).
-  - 회귀 테스트 추가: `server/scripts/test-transition.ts` (6) 진행중 → 접수 되돌리기 + 배정 초기화.
+  - 회귀 테스트 추가: `server/scripts/test-transition.ts` (15) 진행중 → 접수 되돌리기 + 배정 초기화.
 
 ### Fixed
 - **배정 모달 "예상 우선순위"가 영향도만 보고 긴급도를 무시하던 문제** (`src/features/board/ManageBoard.tsx`, `src/features/requests/AdminPanel.tsx`, `src/lib/constants.ts`): 배정 모달의 `IMPACT_PRIORITY_PREVIEW`가 영향도만으로 우선순위를 매핑해(예: 긴급도='보통'·영향도='보통'인데 "P2"로 표시, 실제 서버 산정값은 P3), 낮음 영향도는 "P3/P4"처럼 모호한 값까지 노출했다. 서버 `server/src/sla.ts`의 `derivePriority(urgency, impact)`와 동일한 격자를 클라이언트 사본 `derivePriorityPreview(urgency, impact)`(`src/lib/constants.ts`)로 추가하고, 배정 모달이 대상 요청의 실제 `urgency`와 선택된 `impact`를 함께 넣어 정확한 단일 값을 계산하도록 수정. 요청 상세 관리 패널(`AdminPanel.tsx`)의 영향도 select에도 같은 격자를 적용해, 각 옵션 선택 시 재산정될 우선순위를 미리 보여준다(이전에는 현재 우선순위 뱃지만 표시).

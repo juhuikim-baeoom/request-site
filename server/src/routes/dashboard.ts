@@ -28,6 +28,9 @@ export async function dashboardRoutes(app: FastifyInstance) {
       // 기간 필터 조건 (created_at 기준)
       const fromCond = from ? sql`and r.created_at >= ${from}::timestamptz` : sql``
       const toCond = to ? sql`and r.created_at < (${to}::date + interval '1 day')` : sql``
+      // 이의(request_disputes) 서브쿼리용 — 이의가 걸린 요청(rq)의 created_at 기준으로 같은 창을 적용
+      const disputeFromCond = from ? sql`and rq.created_at >= ${from}::timestamptz` : sql``
+      const disputeToCond = to ? sql`and rq.created_at < (${to}::date + interval '1 day')` : sql``
 
       // ── KPIs ──
       const kpiRows = await db.execute<{
@@ -36,6 +39,13 @@ export async function dashboardRoutes(app: FastifyInstance) {
         p1p2_open: string
         rework_rate: string | null
         csat_positive_pct: string | null
+        dispute_rate: string | null
+        dispute_accept_rate: string | null
+        avg_inspection_days: string | null
+        route_requester: string
+        route_auto: string
+        route_system_forced: string
+        open_dispute_count: string
       }>(sql`
         select
           count(*) filter (
@@ -56,13 +66,51 @@ export async function dashboardRoutes(app: FastifyInstance) {
               count(*) filter (where r.status = '완료')
             )::text
           end as rework_rate,
+          -- CSAT 긍정 비율: 5점 만점 중 4점 이상 = 긍정 (top-two-box)
           case
             when count(*) filter (where r.csat_rating is not null) = 0 then null
             else (
-              count(*) filter (where r.csat_rating = 1)::numeric /
+              count(*) filter (where r.csat_rating >= 4)::numeric /
               count(*) filter (where r.csat_rating is not null)
             )::text
-          end as csat_positive_pct
+          end as csat_positive_pct,
+
+          -- 이의제기율: 완료 건(창 내) 대비 이의가 제기된 건의 비율 — 분자는 분모의 부분집합이 되도록
+          -- r에 대한 filter로 표현한다 (요청 1건에 이의가 여러 건이어도 1건으로만 카운트)
+          case
+            when count(*) filter (where r.status = '완료') = 0 then null
+            else (
+              count(*) filter (where r.status = '완료'
+                and exists (select 1 from request_disputes d where d.request_id = r.id))::numeric
+              / count(*) filter (where r.status = '완료')
+            )::text
+          end as dispute_rate,
+
+          -- 이의 수락률: 심사가 끝난 이의 중 수락 비율 — 이의가 걸린 요청(rq)의 created_at을
+          -- 같은 기간 창으로 제한한다 (이의 row 자체는 r에 대한 filter로 표현할 수 없어 서브쿼리 유지)
+          (
+            select case
+              when count(*) filter (where d.status_cd in ('ACCEPTED','REJECTED')) = 0 then null
+              else count(*) filter (where d.status_cd = 'ACCEPTED')::numeric
+                   / count(*) filter (where d.status_cd in ('ACCEPTED','REJECTED'))
+            end
+            from request_disputes d
+            join requests rq on rq.id = d.request_id
+            where true ${disputeFromCond} ${disputeToCond}
+          )::text as dispute_accept_rate,
+
+          -- 평균 검수 소요일: 팀이 손 뗀 시점(first_resolved_at) → 최종 완료
+          avg(
+            case when r.final_resolved_at is not null and r.first_resolved_at is not null
+                 then extract(epoch from (r.final_resolved_at - r.first_resolved_at)) / 86400
+            end
+          )::text as avg_inspection_days,
+
+          count(*) filter (where r.completion_route = 'REQUESTER')::text     as route_requester,
+          count(*) filter (where r.completion_route = 'AUTO')::text          as route_auto,
+          count(*) filter (where r.completion_route = 'SYSTEM_FORCED')::text as route_system_forced,
+
+          (select count(*) from request_disputes where status_cd = 'OPEN')::text as open_dispute_count
         from request_view r
         where true ${fromCond} ${toCond}
       `)
@@ -74,6 +122,15 @@ export async function dashboardRoutes(app: FastifyInstance) {
         p1p2Open: parseInt(kpiRow.p1p2_open ?? '0', 10),
         reworkRate: kpiRow.rework_rate != null ? parseFloat(kpiRow.rework_rate) : null,
         csatPositivePct: kpiRow.csat_positive_pct != null ? parseFloat(kpiRow.csat_positive_pct) : null,
+        disputeRate: kpiRow.dispute_rate != null ? parseFloat(kpiRow.dispute_rate) : null,
+        disputeAcceptRate: kpiRow.dispute_accept_rate != null ? parseFloat(kpiRow.dispute_accept_rate) : null,
+        avgInspectionDays: kpiRow.avg_inspection_days != null ? parseFloat(kpiRow.avg_inspection_days) : null,
+        openDisputeCount: Number(kpiRow.open_dispute_count ?? 0),
+        completionRoutes: {
+          REQUESTER: Number(kpiRow.route_requester ?? 0),
+          AUTO: Number(kpiRow.route_auto ?? 0),
+          SYSTEM_FORCED: Number(kpiRow.route_system_forced ?? 0),
+        },
       }
 
       // ── Leadtime (중앙값) ──
@@ -153,8 +210,8 @@ export async function dashboardRoutes(app: FastifyInstance) {
               count(*) filter (
                 where r.status = '완료'
                   and r.resolution_due_at is not null
-                  and r.final_resolved_at is not null
-                  and r.final_resolved_at <= r.resolution_due_at
+                  and r.first_resolved_at is not null
+                  and r.first_resolved_at <= r.resolution_due_at
               )::numeric /
               count(*) filter (
                 where r.status = '완료' and r.resolution_due_at is not null
