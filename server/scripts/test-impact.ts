@@ -92,7 +92,9 @@ async function makeRequest() {
 {
   const req = await makeRequest()
   await assignRequest({ reqId: req.id, assigneeId: actorId, impact: '보통', actorId })
-  await changeStatus({ reqId: req.id, to: '완료', actorId })
+  // 진행중 → 완료 직행은 없다(검수대기 경유). 완료 전이에는 completionRoute가 필수.
+  await changeStatus({ reqId: req.id, to: '검수대기', actorId })
+  await changeStatus({ reqId: req.id, to: '완료', actorId, completionRoute: 'SYSTEM_FORCED' })
   let threw = false
   try {
     await changeImpact({ reqId: req.id, impact: '높음', actorId })
