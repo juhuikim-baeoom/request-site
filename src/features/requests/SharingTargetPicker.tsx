@@ -114,9 +114,12 @@ export function SharingTargetPicker({
         candidates.length === 0 ? 0 : (i - 1 + candidates.length) % candidates.length,
       )
     } else if (e.key === 'Enter') {
-      if (open && candidates[activeIndex]) {
+      if (open) {
+        // 콤보박스가 열린 동안에는 검색어가 후보와 매칭되지 않아도 폼 제출로 새면 안 된다.
         e.preventDefault()
-        add(candidates[activeIndex])
+        if (candidates[activeIndex]) {
+          add(candidates[activeIndex])
+        }
       }
     } else if (e.key === 'Escape') {
       setOpen(false)
@@ -160,34 +163,39 @@ export function SharingTargetPicker({
           onKeyDown={onKeyDown}
         />
 
-        {open && !disabled && (
-          <ul
-            id={listId}
-            role="listbox"
-            className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-md border border-gray-200 bg-white py-1 shadow-lg"
-          >
-            {candidates.length === 0 ? (
-              <li className="px-3 py-2 text-xs text-gray-400">일치하는 팀·부서가 없습니다.</li>
-            ) : (
-              candidates.map((c, i) => (
-                <li
-                  key={c.value}
-                  id={optionId(i)}
-                  role="option"
-                  aria-selected={i === activeIndex}
-                  onMouseDown={(e) => e.preventDefault()} // blur보다 먼저 클릭이 처리되게
-                  onClick={() => add(c)}
-                  onMouseEnter={() => setActiveIndex(i)}
-                  className={`cursor-pointer px-3 py-1.5 text-sm ${
-                    i === activeIndex ? 'bg-brand/10 text-brand' : 'text-gray-700'
-                  }`}
-                >
-                  {c.label}
-                </li>
-              ))
-            )}
-          </ul>
-        )}
+        {/*
+          닫힌 상태에서도 항상 마운트한다 — aria-controls={listId}가 입력칸에 항상 붙어 있으므로,
+          조건부 렌더로 요소를 없애면 존재하지 않는 id를 가리키게 된다(SharingEditor의
+          hidden={!open} 관례를 따름). hidden 속성은 렌더 트리에서 display:none으로 빠지므로
+          보조기기 접근성 트리에서도 제외되어, 닫힌 listbox가 노출되는 문제도 함께 막는다.
+        */}
+        <ul
+          id={listId}
+          role="listbox"
+          hidden={!open || disabled}
+          className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-md border border-gray-200 bg-white py-1 shadow-lg"
+        >
+          {candidates.length === 0 ? (
+            <li className="px-3 py-2 text-xs text-gray-400">일치하는 팀·부서가 없습니다.</li>
+          ) : (
+            candidates.map((c, i) => (
+              <li
+                key={c.value}
+                id={optionId(i)}
+                role="option"
+                aria-selected={i === activeIndex}
+                onMouseDown={(e) => e.preventDefault()} // blur보다 먼저 클릭이 처리되게
+                onClick={() => add(c)}
+                onMouseEnter={() => setActiveIndex(i)}
+                className={`cursor-pointer px-3 py-1.5 text-sm ${
+                  i === activeIndex ? 'bg-brand/10 text-brand' : 'text-gray-700'
+                }`}
+              >
+                {c.label}
+              </li>
+            ))
+          )}
+        </ul>
       </div>
 
       {/* 선택된 공유대상 — 0개면 렌더하지 않는다 */}
