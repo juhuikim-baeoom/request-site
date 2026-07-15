@@ -537,13 +537,6 @@ export function RequestForm() {
               {submitError}
             </div>
           )}
-
-          {/* 모바일(<lg) 하단 고정 제출바 — lg 이상에서 숨김 */}
-          <div
-            className="lg:hidden"
-            style={{ paddingBottom: 'calc(56px + env(safe-area-inset-bottom, 0px))' }}
-            aria-hidden="true"
-          />
         </section>
 
         {/* ───────── 속성·공유 사이드바 ───────── */}
@@ -628,6 +621,17 @@ export function RequestForm() {
             </div>
           </div>
         </aside>
+
+        {/* 모바일(<lg) 하단 고정 제출바(높이 ~65px)가 마지막 내용을 가리지 않도록
+            폼 맨 아래에 여백을 둔다. 단일 컬럼일 때 이 여백은 속성·공유 카드 바로 아래에 온다.
+            이전에는 이 스페이서가 작성 컬럼 끝(첨부 다음)에 있어, 단일 컬럼에서 첨부와
+            속성 카드 사이 중간에 끼고 정작 카드 하단은 고정 바에 가려졌다.
+            lg 이상은 카드 안 인라인 제출 버튼을 쓰므로 숨긴다. */}
+        <div
+          className="lg:hidden"
+          style={{ height: 'calc(72px + env(safe-area-inset-bottom, 0px))' }}
+          aria-hidden="true"
+        />
       </form>
 
       {/* 모바일 하단 고정 제출바 (<lg) */}
