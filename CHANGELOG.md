@@ -65,6 +65,7 @@
   - docs sync: 화면 노출 규칙 불변(내부 리팩토링) — `docs/reference/requirements.md`·`docs/00-overview/index.md` 갱신 스킵.
 
 ### Fixed
+- **요청 접수 폼 — 왼쪽 `유형` 제목과 오른쪽 `속성·공유` 제목이 세로로 21px 어긋나던 문제** (`src/features/requests/RequestForm.tsx`): 두 컬럼의 컨테이너 top은 같았지만, 오른쪽만 카드(`p-5`, top 20px 패딩) 안에 제목이 있어 헤더 텍스트가 그만큼 아래로 밀렸다. 카드가 없는 왼쪽 작성 컬럼에 `lg:pt-5`를 줘 두 제목을 같은 라인에 맞췄다(모바일 단일 컬럼은 무영향). 값이 사이드바 카드 패딩과 커플링돼 있어 주석으로 명시.
 - **병합 직전 최종 리뷰 지적 5건 — 공유대상 검색+칩 브랜치** (`src/features/requests/SharingTargetPicker.tsx`, `CHANGELOG.md`, `docs/superpowers/specs/2026-07-14-sharing-target-picker-design.md`):
   - **[Important] 후보에 없는 공유대상이 칩으로 안 보이고 해제도 못 하던 유령 공유**: 칩 목록(`selected`)을 후보 목록(`allCandidates`)의 부분집합으로 계산하고 있어, 저장된 값이 후보에 없으면(조직도에서 그 세부부서가 빠졌거나 `useDeptOptions()`가 아직 로딩/실패 중이면) 칩이 아예 렌더되지 않았다. 그런데 부모 Set(`fnTargets`·`deptTargets`)에는 값이 그대로 남아 있어 저장하면 그 공유가 다시 저장됐다 — 화면은 "공유대상 없음"이라고 알리는데(`aria-live`) 실제로는 공유가 살아 있고 UI로 해제할 방법이 없었다. `selected`를 부모 Set 기준으로 다시 계산하도록 수정: 후보 목록에서 라벨을 찾되, 없는 값은 `parseDeptTargetValue()`로 `기관 › 팀` 라벨을 만들어(직무는 `값 전체`) 대체 후보를 만든다. 서버로 보내는 값(`target_value`)은 그대로 두고 라벨만 만들어낸다. 실제 재현으로 확인: 서버 화이트리스트는 통과하지만(`ORGS`·`FUNCTION_TARGETS` 조합) `org_directory`에 없는 조합(`허브|시스템팀`)으로 요청을 만들어 `/api/dept-options` 응답에는 없음을 확인한 뒤, 상세 화면의 "공유 범위 수정" 패널에서 칩이 뜨고 ✕로 해제되는 것을 브라우저로 확인.
   - **[Important] 키보드로 8번째 이후 후보로 내려가면 활성 항목이 목록 밖으로 나가던 문제**: 목록이 `max-h-56`(약 7개 높이)인데 검색어가 없으면 17개가 뜨고, `activeIndex`만 바뀌고 스크롤은 따라가지 않았다. `activeIndex`·`open`이 바뀔 때 해당 옵션을 `scrollIntoView({ block: 'nearest' })`로 보이게 하는 effect를 추가.

@@ -300,7 +300,10 @@ export function RequestForm() {
         aria-label="요청 접수 폼"
       >
         {/* ───────── 작성 컬럼 ───────── */}
-        <section aria-label="요청 작성" className="min-w-0 space-y-6">
+        {/* lg:pt-5 = 사이드바 카드의 p-5(top 20px)와 맞춰, 카드가 없는 이 컬럼의 첫 제목(유형)이
+            오른쪽 카드 안 첫 제목(속성·공유)과 같은 라인에 오게 한다. 값이 카드 패딩과 커플링돼
+            있으므로 사이드바 카드 패딩을 바꾸면 이 값도 함께 조정한다. */}
+        <section aria-label="요청 작성" className="min-w-0 space-y-6 lg:pt-5">
 
           {/* 유형: 카드형 네이티브 radio */}
           <fieldset id="fieldset-type_code" tabIndex={-1}>
