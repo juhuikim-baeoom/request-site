@@ -12,14 +12,23 @@ import {
   dueBadgeClass,
 } from '../../lib/constants'
 import { fmtDate, fmtDateTime } from '../../lib/format'
-import { canSeeAllRequests } from '../../lib/permissions'
 import type { RequestOrg, RequestStatus, RequestVisibility } from '../../types/database'
 import { useRequestTypes, useRequestViews, useVisibleSharedTargets } from './api'
 
-type Tab = 'mine' | 'others'
+// 탭 = "이 요청이 왜 나에게 보이는가"(근거)로 목록을 자른다. 서버 authz.ts의 근거 4가지와 1:1.
+//   mine    ① 내가 요청자
+//   shared  ③ 공개범위·공유대상이 나를 지목 (역할 특권 제외)
+//   monitor ② 모니터 역할의 소속 범위 — org_monitor·dept_monitor에게만 노출
+//   all     내가 볼 수 있는 전부 (위 탭들의 상위집합)
+// 칸막이가 아니라 필터다: 우리 부서 요청이면서 공개범위가 dept면 shared·monitor 양쪽에 나온다.
+type Tab = 'mine' | 'shared' | 'monitor' | 'all'
 type Sort = 'recent' | 'due'
 
-// localStorage 저장 키
+const TABS: Tab[] = ['mine', 'shared', 'monitor', 'all']
+
+// localStorage 저장 키.
+// 탭 값 'others'가 폐기됐지만 키는 올리지 않는다 — 키를 올리면 상태·유형·정렬 같은
+// 나머지 필터까지 함께 날아간다. 아래 loadSavedView가 모르는 탭 값만 'mine'으로 떨군다.
 const STORAGE_KEY = 'my_requests_view_v1'
 
 interface SavedView {
@@ -36,8 +45,11 @@ function loadSavedView(): SavedView {
     const raw = localStorage.getItem(STORAGE_KEY)
     if (raw) {
       const parsed = JSON.parse(raw) as Partial<SavedView>
+      // 필드별로 개별 검증한다 — 모르는 값 하나가 저장뷰 전체를 버리게 하지 않는다.
+      // 폐기된 탭 값('others')이나 지금 역할에 없는 탭이면 탭만 'mine'으로 돌아가고,
+      // 상태·유형·기관·정렬·종결포함은 그대로 복원된다.
       return {
-        tab: parsed.tab === 'others' ? 'others' : 'mine',
+        tab: TABS.includes(parsed.tab as Tab) ? (parsed.tab as Tab) : 'mine',
         status: (STATUS_OPTIONS as string[]).includes(parsed.status ?? '')
           ? (parsed.status as RequestStatus)
           : '',
@@ -127,8 +139,12 @@ export function MyRequests() {
 
   const filtered = useMemo(() => {
     const list = (rows ?? []).filter((r) => {
+      // 탭 = 열람 근거 필터. shared_to_me·in_monitor_scope는 서버가 계산해 내려준다(api.ts).
       const isMine = r.requester_id === profile?.id
-      if (tab === 'mine' ? !isMine : isMine) return false
+      if (tab === 'mine' && !isMine) return false
+      if (tab === 'shared' && !r.shared_to_me) return false
+      if (tab === 'monitor' && !r.in_monitor_scope) return false
+      // tab === 'all' — 서버가 이미 열람 범위로 걸러줬으므로 추가 조건 없음
 
       // 종결 포함 토글 — 꺼져 있으면 열린 상태만
       const rowStatus = r.status as RequestStatus | null
@@ -152,19 +168,30 @@ export function MyRequests() {
   }, [rows, profile?.id, tab, status, typeCode, org, sort, showClosed])
 
   // 탭은 '장소'가 아니라 '범위'를 가리킨다 — 페이지 제목(요청 목록)과 단어가 겹치지 않게 한다.
-  // 두 번째 탭의 범위는 역할에 따라 달라진다 — 서버 visibilityFilter가 실제 범위를 정한다.
-  const othersLabel = canSeeAllRequests(profile?.role)
-    ? '전체'
-    : profile?.role === 'org_monitor'
-      ? '우리 기관'
-      : profile?.role === 'dept_monitor'
-        ? '우리 부서'
-        : '공유받은 요청'
+  // 라벨은 사람마다 뜻이 바뀌지 않는다. 모니터 탭은 그 근거를 가진 역할에게만 보이며,
+  // 라벨도 역할별로 하나뿐이라("우리 기관" 또는 "우리 부서") 헷갈리지 않는다.
+  // '전체'는 모두에게 노출하되 실제 범위는 서버 visibilityFilter가 정한다
+  // — staff에게는 회사 전체가 아니라 '내가 볼 수 있는 전부'(나의+공유받은)다.
+  const monitorLabel =
+    profile?.role === 'org_monitor' ? '우리 기관' : profile?.role === 'dept_monitor' ? '우리 부서' : null
+
+  const visibleTabs: { tab: Tab; label: string }[] = [
+    { tab: 'mine', label: '나의 요청' },
+    { tab: 'shared', label: '공유받은 요청' },
+    ...(monitorLabel ? [{ tab: 'monitor' as Tab, label: monitorLabel }] : []),
+    { tab: 'all', label: '전체' },
+  ]
+
+  // 저장뷰에 남아 있던 탭이 지금 역할에 없으면(예: 모니터 역할 해제) 기본 탭으로 되돌린다.
+  useEffect(() => {
+    if (!visibleTabs.some((t) => t.tab === tab)) setTab('mine')
+  }, [tab, monitorLabel])
 
   function tabBtn(t: Tab, label: string) {
     const active = tab === t
     return (
       <button
+        key={t}
         role="tab"
         onClick={() => setTab(t)}
         aria-selected={active}
@@ -183,8 +210,7 @@ export function MyRequests() {
 
       {/* 탭 */}
       <div className="mt-4 flex gap-1" role="tablist" aria-label="요청 범위 탭">
-        {tabBtn('mine', '나의 요청')}
-        {tabBtn('others', othersLabel)}
+        {visibleTabs.map((t) => tabBtn(t.tab, t.label))}
       </div>
 
       {/* 필터 행 */}
@@ -258,11 +284,30 @@ export function MyRequests() {
 
       {/* ---- 데스크톱 표 (sm 이상) ---- */}
       <div className="mt-4 hidden overflow-x-auto rounded-lg border border-gray-200 bg-white sm:block">
-        <table className="min-w-[900px] w-full text-sm">
+        <table className="min-w-[1100px] w-full table-fixed text-sm">
+          {/*
+            컬럼 너비 — 각 열 텍스트 길이 비율로 배정하되 제목은 넉넉하게(22%).
+            순서: 접수번호 9 · 제목 22 · 공유범위 13 · 기관 6 · 유형 9 ·
+                  우선순위 7 · 상태 7 · SLA 기한 10 · 담당 6 · 접수일 11 (합 100)
+            (colgroup 안에는 공백 텍스트 노드가 들어갈 수 없어 주석을 밖에 둔다)
+          */}
+          <colgroup>
+            <col className="w-[9%]" />
+            <col className="w-[22%]" />
+            <col className="w-[13%]" />
+            <col className="w-[6%]" />
+            <col className="w-[9%]" />
+            <col className="w-[7%]" />
+            <col className="w-[7%]" />
+            <col className="w-[10%]" />
+            <col className="w-[6%]" />
+            <col className="w-[11%]" />
+          </colgroup>
           <thead>
             <tr className="border-b border-gray-200 bg-gray-50 text-left text-xs text-gray-500">
               <th scope="col" className="px-3 py-2 font-medium">접수번호</th>
               <th scope="col" className="px-3 py-2 font-medium">제목</th>
+              <th scope="col" className="px-3 py-2 font-medium">공유범위</th>
               <th scope="col" className="px-3 py-2 font-medium">기관</th>
               <th scope="col" className="px-3 py-2 font-medium">유형</th>
               <th scope="col" className="px-3 py-2 font-medium">우선순위</th>
@@ -275,14 +320,14 @@ export function MyRequests() {
           <tbody>
             {isLoading && (
               <tr>
-                <td colSpan={9} className="px-3 py-10 text-center text-gray-400">
+                <td colSpan={10} className="px-3 py-10 text-center text-gray-400">
                   불러오는 중...
                 </td>
               </tr>
             )}
             {!isLoading && filtered.length === 0 && (
               <tr>
-                <td colSpan={9} className="px-3 py-10 text-center text-gray-400">
+                <td colSpan={10} className="px-3 py-10 text-center text-gray-400">
                   표시할 요청이 없습니다.
                 </td>
               </tr>
@@ -307,21 +352,27 @@ export function MyRequests() {
                   <td className="px-3 py-2">
                     <Link
                       to={`/requests/${r.id}?from=mine`}
-                      className="font-medium text-gray-900 hover:text-brand hover:underline"
+                      className="block truncate font-medium text-gray-900 hover:text-brand hover:underline"
+                      title={r.title ?? undefined}
                     >
                       {r.title}
                     </Link>
-                    {r.visibility && (
-                      <div className="mt-0.5">
-                        <VisibilityBadge
-                          visibility={r.visibility as RequestVisibility}
-                          sharedTargets={r.id != null ? sharedMap?.get(r.id) : undefined}
-                        />
-                      </div>
+                  </td>
+                  <td className="px-3 py-2">
+                    {r.visibility ? (
+                      <VisibilityBadge
+                        visibility={r.visibility as RequestVisibility}
+                        sharedTargets={r.id != null ? sharedMap?.get(r.id) : undefined}
+                        maxTargets={2}
+                      />
+                    ) : (
+                      <span className="text-xs text-gray-400">-</span>
                     )}
                   </td>
-                  <td className="whitespace-nowrap px-3 py-2 text-gray-600">{r.org}</td>
-                  <td className="whitespace-nowrap px-3 py-2 text-gray-600">{r.type_label}</td>
+                  <td className="truncate px-3 py-2 text-gray-600">{r.org}</td>
+                  <td className="truncate px-3 py-2 text-gray-600" title={r.type_label ?? undefined}>
+                    {r.type_label}
+                  </td>
                   <td className="px-3 py-2">
                     {priorityLevel ? (
                       <Badge

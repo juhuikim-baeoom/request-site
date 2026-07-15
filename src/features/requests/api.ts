@@ -24,11 +24,23 @@ import type { Urgency } from '../../lib/constants'
 // ---------- 임팩트(배정 시) ----------
 export type ImpactLevel = '높음' | '보통' | '낮음'
 
+/**
+ * 목록 행 = request_view + "왜 나에게 보이는가" 근거 플래그.
+ * 서버(`GET /api/requests`)가 계산한다 — 공개범위·공유대상·소속 매칭을 프론트가 다시 계산하면
+ * 서버의 열람 필터와 어긋날 수 있다. 둘 다 "내 것이 아닌 것"만 참이다.
+ */
+export type RequestListRow = RequestView & {
+  /** 공개범위나 명시적 공유대상이 나를 지목 (역할 특권 제외) → "공유받은 요청" 탭 */
+  shared_to_me: boolean
+  /** 모니터 역할의 소속 범위(기관/부서) → "우리 기관"·"우리 부서" 탭 */
+  in_monitor_scope: boolean
+}
+
 /** 내가 볼 수 있는 요청 목록 (공개범위 적용). 최신순 */
 export function useRequestViews() {
   return useQuery({
     queryKey: ['requests', 'view'],
-    queryFn: () => apiGet<RequestView[]>('/api/requests'),
+    queryFn: () => apiGet<RequestListRow[]>('/api/requests'),
   })
 }
 
